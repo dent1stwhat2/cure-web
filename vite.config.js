@@ -9,12 +9,12 @@ export default defineConfig({
   base: publicBase,
   plugins: [
     react(),
-    VitePWA({
+    process.env.DISABLE_PWA !== "true" && VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["icons/icon.svg", "icons/icon-180.png", "icons/icon-192.png", "icons/icon-512.png"],
       manifest: {
-        name: "CURE — стоматологическая практика",
-        short_name: "CURE",
+        name: "CURE CLINIC — стоматологическая практика",
+        short_name: "CURE CLINIC",
         description: "Пациенты, лечение, фотопротоколы и финансы клиники",
         theme_color: "#0f5278",
         background_color: "#f4f7f9",
@@ -43,5 +43,5 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,svg,png,webp,woff2}"]
       }
     })
-  ]
+  ].filter(Boolean)
 });
