@@ -146,22 +146,126 @@ function AuthScreen({ onMessage }) {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [resendBusy, setResendBusy] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [registrationComplete, setRegistrationComplete] = useState(false);
+
+  const changeMode = (nextMode) => {
+    setMode(nextMode);
+    setPassword("");
+    setConfirmPassword("");
+    setFormError("");
+    setRegistrationComplete(false);
+  };
 
   const submit = async (event) => {
     event.preventDefault();
-    if (!email || password.length < 8) {
-      onMessage("Введите email и пароль не короче 8 символов");
+    setFormError("");
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) {
+      setFormError("Введите адрес электронной почты.");
+      return;
+    }
+    if (password.length < 8) {
+      setFormError("Пароль должен содержать минимум 8 символов.");
+      return;
+    }
+    if (mode === "register" && password !== confirmPassword) {
+      setFormError("Пароли не совпадают. Проверьте подтверждение пароля.");
       return;
     }
     setBusy(true);
     const result = mode === "login"
-      ? await supabase.auth.signInWithPassword({ email, password })
-      : await supabase.auth.signUp({ email, password });
+      ? await supabase.auth.signInWithPassword({ email: normalizedEmail, password })
+      : await supabase.auth.signUp({
+          email: normalizedEmail,
+          password,
+          options: {
+            emailRedirectTo: `${window.location.origin}${import.meta.env.BASE_URL}`
+          }
+        });
     setBusy(false);
-    if (result.error) onMessage(result.error.message);
-    else if (mode === "register") onMessage("Проверьте почту и подтвердите регистрацию");
+    if (result.error) {
+      const message = result.error.message || "Не удалось выполнить операцию.";
+      if (message.toLowerCase().includes("already registered")) {
+        setFormError("Аккаунт с этой почтой уже существует. Перейдите во вкладку «Войти».");
+      } else if (message.toLowerCase().includes("rate limit")) {
+        setFormError("Слишком много попыток. Подождите несколько минут и попробуйте снова.");
+      } else if (message.toLowerCase().includes("invalid login credentials")) {
+        setFormError("Неверная почта или пароль.");
+      } else {
+        setFormError(`Ошибка: ${message}`);
+      }
+      return;
+    }
+    if (mode === "register") {
+      if (Array.isArray(result.data.user?.identities) && result.data.user.identities.length === 0) {
+        setFormError("Аккаунт с этой почтой уже существует. Перейдите во вкладку «Войти».");
+        return;
+      }
+      if (result.data.session) {
+        onMessage("Аккаунт создан. Добро пожаловать в CURE.");
+      } else {
+        setRegistrationComplete(true);
+      }
+    }
   };
+
+  const resendConfirmation = async () => {
+    setResendBusy(true);
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email: email.trim().toLowerCase(),
+      options: {
+        emailRedirectTo: `${window.location.origin}${import.meta.env.BASE_URL}`
+      }
+    });
+    setResendBusy(false);
+    if (error) {
+      onMessage(error.message || "Не удалось повторно отправить письмо");
+    } else {
+      onMessage("Письмо подтверждения отправлено повторно");
+    }
+  };
+
+  if (registrationComplete) {
+    return (
+      <main className="auth-layout">
+        <section className="auth-hero">
+          <BrandMark />
+          <div>
+            <p className="eyebrow">СТОМАТОЛОГИЧЕСКАЯ ПРАКТИКА</p>
+            <h1>CURE</h1>
+            <p>Пациенты, лечение, фотопротоколы и финансы — в одной синхронизированной клинике.</p>
+          </div>
+          <div className="trust-row">
+            <ShieldCheck /><span>Защищённый вход</span>
+            <Cloud /><span>Синхронизация устройств</span>
+          </div>
+        </section>
+        <section className="auth-card registration-success">
+          <div className="success-icon"><Check /></div>
+          <p className="eyebrow">РЕГИСТРАЦИЯ ВЫПОЛНЕНА</p>
+          <h2>Подтвердите почту</h2>
+          <p className="muted">
+            Мы отправили письмо на <strong>{email.trim().toLowerCase()}</strong>.
+            Откройте письмо от Supabase и нажмите ссылку подтверждения.
+          </p>
+          <div className="auth-help">
+            <strong>Письма нет?</strong>
+            <span>Проверьте папки «Спам», «Промоакции» и правильность адреса.</span>
+          </div>
+          <button className="primary wide" onClick={() => changeMode("login")}>Перейти ко входу</button>
+          <button className="secondary wide" disabled={resendBusy} onClick={resendConfirmation}>
+            {resendBusy ? "Отправляем…" : "Отправить письмо повторно"}
+          </button>
+          <button className="secondary wide" onClick={() => setRegistrationComplete(false)}>Изменить почту</button>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="auth-layout">
@@ -179,8 +283,8 @@ function AuthScreen({ onMessage }) {
       </section>
       <section className="auth-card">
         <div className="segmented">
-          <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Войти</button>
-          <button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Регистрация</button>
+          <button className={mode === "login" ? "active" : ""} onClick={() => changeMode("login")}>Войти</button>
+          <button className={mode === "register" ? "active" : ""} onClick={() => changeMode("register")}>Регистрация</button>
         </div>
         <h2>{mode === "login" ? "С возвращением" : "Создать аккаунт"}</h2>
         <p className="muted">
@@ -193,6 +297,18 @@ function AuthScreen({ onMessage }) {
           <Field label="Пароль">
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder="Минимум 8 символов" />
           </Field>
+          {mode === "register" && (
+            <Field label="Подтверждение пароля">
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                autoComplete="new-password"
+                placeholder="Введите пароль ещё раз"
+              />
+            </Field>
+          )}
+          {formError && <div className="auth-error" role="alert">{formError}</div>}
           <button className="primary wide" disabled={busy}>{busy ? "Подождите…" : mode === "login" ? "Войти в CURE" : "Зарегистрироваться"}</button>
         </form>
         <p className="privacy-note"><LockKeyhole size={15} /> Медицинские данные доступны только участникам вашей клиники.</p>
