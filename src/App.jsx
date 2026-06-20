@@ -39,7 +39,8 @@ const isExpense = (t) => t.type === "Расход" || t.type === "Возврат
 export default function App() {
   const [session, setSession] = useState(cloudEnabled ? null : { user: { email: "demo@cure.app", id: "demo" } });
   const [authReady, setAuthReady] = useState(!cloudEnabled);
-  const [membership, setMembership] = useState(cloudEnabled ? null : { clinic_id: "demo-clinic", role: "owner" });
+  // undefined = проверяем членство, null = у пользователя ещё нет клиники.
+  const [membership, setMembership] = useState(cloudEnabled ? undefined : { clinic_id: "demo-clinic", role: "owner" });
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState("");
@@ -56,13 +57,18 @@ export default function App() {
 
   useEffect(() => {
     if (!cloudEnabled || !session) return;
+    setMembership(undefined);
     supabase.from("clinic_members")
       .select("clinic_id, role, clinics(id,name,invite_code)")
       .eq("user_id", session.user.id)
       .maybeSingle()
       .then(({ data, error }) => {
-        if (error) setToast(error.message);
-        setMembership(data);
+        if (error) {
+          setToast(`Не удалось проверить клинику: ${error.message}`);
+          setMembership(null);
+          return;
+        }
+        setMembership(data ?? null);
       });
   }, [session]);
 
@@ -104,7 +110,7 @@ export default function App() {
 
   if (!authReady) return <Splash />;
   if (!session) return <AuthScreen onMessage={setToast} />;
-  if (cloudEnabled && membership === null) return <Splash label="Открываем клинику…" />;
+  if (cloudEnabled && membership === undefined) return <Splash label="Открываем клинику…" />;
   if (!membership) {
     return <ClinicOnboarding session={session} onJoined={setMembership} onMessage={setToast} />;
   }
