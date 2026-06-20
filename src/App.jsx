@@ -13,9 +13,9 @@ import {
 } from "recharts";
 import { cloudEnabled, supabase } from "./supabase";
 import {
-  deletePatient, deletePhoto, deleteTransaction, loadClinicData, resetDemo,
+  deleteDocument, deletePatient, deletePhoto, deleteTransaction, loadClinicData, resetDemo,
   savePatient, saveTransaction, saveVisit, subscribeToClinic, updatePhoto,
-  uploadPhotos
+  uploadDocuments, uploadPhotos
 } from "./data";
 
 const money = new Intl.NumberFormat("ru-RU", {
@@ -728,15 +728,17 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
   const [txEditor, setTxEditor] = useState(false);
   const [treatmentEditor, setTreatmentEditor] = useState(null);
   const [toothEditor, setToothEditor] = useState(null);
+  const [documentUploader, setDocumentUploader] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
   const finance = patientFinancials(patient.id, data);
   const visits = data.visits.filter((v) => v.patient_id === patient.id).sort((a, b) => new Date(b.date) - new Date(a.date));
   const photos = data.photos.filter((p) => p.patient_id === patient.id);
+  const documents = (data.documents || []).filter((document) => document.patient_id === patient.id);
   const warnings = patientWarnings(patient);
 
   const remove = async () => {
     if (!confirm("Удалить пациента, все визиты, финансы и фотографии безвозвратно?")) return;
-    await deletePatient(clinicId, patient.id, photos);
+    await deletePatient(clinicId, patient.id, photos, documents);
     await refresh();
     notify("Пациент удалён");
     back();
@@ -800,7 +802,7 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
         <button onClick={() => setTxEditor(true)}><WalletCards /><span>Оплата</span></button>
       </div>
       <div className="chip-scroll">
-        {["Обзор", "Зубная формула", "История", "Документы", "Анамнез", "Лечение", "Финансы", "Фото", "Заметки"].map((item) => (
+        {["Обзор", "Зубная формула", "История", "Рекомендации", "Документы", "Анамнез", "Лечение", "Финансы", "Фото", "Заметки"].map((item) => (
           <button key={item} className={section === item ? "active" : ""} onClick={() => setSection(item)}>{item}</button>
         ))}
       </div>
@@ -822,7 +824,18 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
         <PatientTimeline patient={patient} data={data} />
       )}
       {section === "Документы" && (
-        <DocumentsSection patient={patient} clinic={data.clinic} visits={visits} />
+        <DocumentsSection
+          patient={patient}
+          clinic={data.clinic}
+          visits={visits}
+          documents={documents}
+          onUpload={() => setDocumentUploader(true)}
+          refresh={refresh}
+          notify={notify}
+        />
+      )}
+      {section === "Рекомендации" && (
+        <RecommendationsSection patient={patient} clinic={data.clinic} visits={visits} clinicId={clinicId} refresh={refresh} notify={notify} />
       )}
       {section === "Лечение" && (
         <VisitsSection visits={visits} onAdd={() => setVisitEditor({})} onEdit={setVisitEditor} />
@@ -861,6 +874,14 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
           clinicId={clinicId}
           onClose={() => setToothEditor(null)}
           onSaved={async () => { await refresh(); setToothEditor(null); notify("Зубная формула обновлена"); }}
+        />
+      )}
+      {documentUploader && (
+        <DocumentUploader
+          patient={patient}
+          clinicId={clinicId}
+          onClose={() => setDocumentUploader(false)}
+          onSaved={async () => { await refresh(); setDocumentUploader(false); notify("Документы добавлены"); }}
         />
       )}
     </section>
@@ -1129,14 +1150,71 @@ function PatientTimeline({ patient, data }) {
   );
 }
 
-function DocumentsSection({ patient, clinic, visits }) {
+function RecommendationsSection({ patient, clinic, visits, clinicId, refresh, notify }) {
+  const [text, setText] = useState(patient.dental?.recommendations || visits[0]?.recommendations || "");
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try {
+      await savePatient(clinicId, {
+        ...patient,
+        dental: { ...(patient.dental || {}), recommendations: text }
+      });
+      await refresh();
+      notify("Рекомендации сохранены");
+    } catch (error) {
+      alert(error.message || "Не удалось сохранить рекомендации");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="section-block">
+      <div className="section-heading">
+        <div><h2>Рекомендации пациенту</h2><p>Заполните один раз, затем распечатайте или сохраните как PDF</p></div>
+        <button className="secondary" onClick={() => printPatientDocument("recommendations", { ...patient, dental: { ...(patient.dental || {}), recommendations: text } }, clinic, treatmentItems(patient), visits[0])}><Printer />Печать / PDF</button>
+      </div>
+      <article className="info-card recommendations-editor">
+        <textarea value={text} onChange={(event) => setText(event.target.value)} placeholder={"Например:\n• Не принимать пищу в течение 2 часов.\n• Исключить горячее и твёрдое в первые сутки.\n• При появлении боли связаться с клиникой."} />
+        <div>
+          <span>{text.length} символов</span>
+          <button className="primary" disabled={busy} onClick={save}>{busy ? "Сохранение…" : "Сохранить рекомендации"}</button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function DocumentsSection({ patient, clinic, visits, documents, onUpload, refresh, notify }) {
   const plan = treatmentItems(patient);
   const latest = visits[0];
   const print = (type) => printPatientDocument(type, patient, clinic, plan, latest);
+  const remove = async (document) => {
+    if (!confirm(`Удалить файл «${document.file_name}»?`)) return;
+    await deleteDocument(document);
+    await refresh();
+    notify("Документ удалён");
+  };
+  const download = async (document) => {
+    try {
+      const response = await fetch(document.signed_url);
+      if (!response.ok) throw new Error("Файл недоступен");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = window.document.createElement("a");
+      link.href = url;
+      link.download = document.file_name;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      alert(error.message || "Не удалось скачать документ");
+    }
+  };
   return (
     <div className="section-block">
       <div className="section-heading">
         <div><h2>Документы пациента</h2><p>Печать или сохранение через «Сохранить как PDF»</p></div>
+        <button className="primary" onClick={onUpload}><Upload />Добавить файл</button>
       </div>
       <div className="documents-grid">
         <article className="document-card">
@@ -1156,6 +1234,26 @@ function DocumentsSection({ patient, clinic, visits }) {
         </article>
       </div>
       <div className="document-notice"><AlertTriangle />Текст согласия является базовым шаблоном. Перед использованием проверьте его с юристом по требованиям вашей страны.</div>
+      <div className="section-heading uploaded-documents-heading"><div><h2>Загруженные файлы</h2><p>{documents.length} файлов</p></div></div>
+      {documents.length ? (
+        <div className="uploaded-documents">
+          {documents.map((document) => (
+            <article className="uploaded-document" key={document.id}>
+              <div className="file-type">{fileExtension(document.file_name)}</div>
+              <div>
+                <strong>{document.file_name}</strong>
+                <span>{document.category} · {formatFileSize(document.file_size)} · {safeDate(document.created_at)}</span>
+                {document.comment && <p>{document.comment}</p>}
+              </div>
+              <div className="document-actions">
+                <a className="secondary" href={document.signed_url} target="_blank" rel="noreferrer"><FileText />Открыть</a>
+                <button className="secondary" onClick={() => download(document)}><Download />Скачать</button>
+              </div>
+              <button className="icon-button mini danger-ghost" onClick={() => remove(document)}><Trash2 /></button>
+            </article>
+          ))}
+        </div>
+      ) : <Empty icon={<FileText />} title="Своих файлов пока нет" text="Добавьте согласие, PDF, Word, Excel, презентацию, снимок или другой документ пациента." action={onUpload} />}
     </div>
   );
 }
@@ -1613,6 +1711,65 @@ function PhotoUploader({ patient, visits, clinicId, onClose, onSaved }) {
   );
 }
 
+function DocumentUploader({ patient, clinicId, onClose, onSaved }) {
+  const [files, setFiles] = useState([]);
+  const [category, setCategory] = useState("Медицинский документ");
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
+  const maxSize = 50 * 1024 * 1024;
+  const appendFiles = (list) => {
+    const oversized = list.find((file) => file.size > maxSize);
+    if (oversized) return alert(`Файл «${oversized.name}» больше 50 МБ`);
+    setFiles((current) => [...current, ...list]);
+  };
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!files.length) return alert("Выберите хотя бы один файл");
+    setBusy(true);
+    try {
+      await uploadDocuments(clinicId, patient.id, category, comment.trim(), files);
+      await onSaved();
+    } catch (error) {
+      alert(error.message || "Не удалось загрузить документы");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title="Добавление документов" onClose={onClose}>
+      <form onSubmit={submit}>
+        <div className="form-grid">
+          <Field label="Категория" full>
+            <select value={category} onChange={(event) => setCategory(event.target.value)}>
+              {["Согласие", "Договор", "План лечения", "Рекомендации", "Анализы", "Рентген / КЛКТ", "Презентация", "Финансовый документ", "Медицинский документ", "Другое"].map((value) => <option key={value}>{value}</option>)}
+            </select>
+          </Field>
+          <Field label="Комментарий" full><textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Необязательное описание документа" /></Field>
+          <label className="upload-zone full document-upload-zone">
+            <Upload />
+            <strong>Выбрать файлы</strong>
+            <span>PDF, Word, Excel, PowerPoint, изображения, текст и другие документы — до 50 МБ каждый</span>
+            <input
+              type="file"
+              multiple
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.rtf,.txt,.csv,.jpg,.jpeg,.png,.webp,.heic,.zip"
+              onChange={(event) => appendFiles([...event.target.files])}
+            />
+          </label>
+          {files.length > 0 && (
+            <div className="selected-document-files full">
+              {files.map((file, index) => (
+                <div key={`${file.name}-${index}`}><FileText /><span><strong>{file.name}</strong><small>{formatFileSize(file.size)}</small></span><button type="button" onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X /></button></div>
+              ))}
+            </div>
+          )}
+        </div>
+        <ModalActions busy={busy} onCancel={onClose} />
+      </form>
+    </Modal>
+  );
+}
+
 function SettingsSheet({ session, membership, clinic, close, notify }) {
   const copy = async () => {
     await navigator.clipboard.writeText(clinic.invite_code);
@@ -1666,6 +1823,18 @@ function patientWarnings(patient) {
   if (anamnesis.hypertension) warnings.push("Артериальная гипертензия");
   if (anamnesis.contraindications) warnings.push(`Противопоказания: ${anamnesis.contraindications}`);
   return warnings;
+}
+
+function formatFileSize(bytes = 0) {
+  const value = Number(bytes || 0);
+  if (value < 1024) return `${value} Б`;
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} КБ`;
+  return `${(value / 1024 / 1024).toFixed(value >= 10 * 1024 * 1024 ? 0 : 1)} МБ`;
+}
+
+function fileExtension(name = "") {
+  const extension = name.includes(".") ? name.split(".").pop() : "FILE";
+  return extension.slice(0, 5).toUpperCase();
 }
 
 function patientFinancials(patientId, data) {

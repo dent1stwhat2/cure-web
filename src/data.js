@@ -50,7 +50,8 @@ const demoSeed = {
     { id: "t3", patient_id: "p1", type: "Расход", amount: 3200, category: "Материалы", payment_method: "Карта", date: new Date(Date.now() - 86400000 * 4).toISOString(), comment: "" },
     { id: "t4", type: "Расход", amount: 12000, category: "Лаборатория", payment_method: "Перевод", date: new Date(Date.now() - 86400000 * 8).toISOString(), comment: "" }
   ],
-  photos: []
+  photos: [],
+  documents: []
 };
 
 const readDemo = () => {
@@ -62,25 +63,31 @@ const writeDemo = (data) => localStorage.setItem(DEMO_KEY, JSON.stringify(data))
 
 export async function loadClinicData(clinicId) {
   if (!cloudEnabled) return readDemo();
-  const [clinic, patients, visits, transactions, photos] = await Promise.all([
+  const [clinic, patients, visits, transactions, photos, documents] = await Promise.all([
     supabase.from("clinics").select("*").eq("id", clinicId).single(),
     supabase.from("patients").select("*").eq("clinic_id", clinicId).order("updated_at", { ascending: false }),
     supabase.from("visits").select("*").eq("clinic_id", clinicId).order("date", { ascending: false }),
     supabase.from("finance_transactions").select("*").eq("clinic_id", clinicId).order("date", { ascending: false }),
-    supabase.from("photo_records").select("*").eq("clinic_id", clinicId).order("created_at", { ascending: false })
+    supabase.from("photo_records").select("*").eq("clinic_id", clinicId).order("created_at", { ascending: false }),
+    supabase.from("patient_documents").select("*").eq("clinic_id", clinicId).order("created_at", { ascending: false })
   ]);
-  const error = [clinic, patients, visits, transactions, photos].find((r) => r.error)?.error;
+  const error = [clinic, patients, visits, transactions, photos, documents].find((r) => r.error)?.error;
   if (error) throw error;
   const signedPhotos = await Promise.all((photos.data || []).map(async (photo) => {
     const { data } = await supabase.storage.from("clinical-photos").createSignedUrl(photo.storage_path, 3600);
     return { ...photo, signed_url: data?.signedUrl };
+  }));
+  const signedDocuments = await Promise.all((documents.data || []).map(async (document) => {
+    const { data } = await supabase.storage.from("patient-documents").createSignedUrl(document.storage_path, 3600);
+    return { ...document, signed_url: data?.signedUrl };
   }));
   return {
     clinic: clinic.data,
     patients: patients.data || [],
     visits: visits.data || [],
     transactions: transactions.data || [],
-    photos: signedPhotos
+    photos: signedPhotos,
+    documents: signedDocuments
   };
 }
 
@@ -104,19 +111,73 @@ export async function savePatient(clinicId, patient) {
   return data;
 }
 
-export async function deletePatient(clinicId, patientId, photos = []) {
+export async function deletePatient(clinicId, patientId, photos = [], documents = []) {
   if (!cloudEnabled) {
     const data = readDemo();
     data.patients = data.patients.filter((p) => p.id !== patientId);
     data.visits = data.visits.filter((v) => v.patient_id !== patientId);
     data.transactions = data.transactions.filter((t) => t.patient_id !== patientId);
     data.photos = data.photos.filter((p) => p.patient_id !== patientId);
+    data.documents = (data.documents || []).filter((document) => document.patient_id !== patientId);
     writeDemo(data);
     return;
   }
   const paths = photos.filter((p) => p.patient_id === patientId).map((p) => p.storage_path);
   if (paths.length) await supabase.storage.from("clinical-photos").remove(paths);
+  const documentPaths = documents.filter((document) => document.patient_id === patientId).map((document) => document.storage_path);
+  if (documentPaths.length) await supabase.storage.from("patient-documents").remove(documentPaths);
   const { error } = await supabase.from("patients").delete().eq("clinic_id", clinicId).eq("id", patientId);
+  if (error) throw error;
+}
+
+export async function uploadDocuments(clinicId, patientId, category, comment, files) {
+  if (!cloudEnabled) {
+    const data = readDemo();
+    data.documents ||= [];
+    for (const file of files) {
+      const url = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(file);
+      });
+      data.documents.unshift({
+        id: crypto.randomUUID(), patient_id: patientId, category, comment,
+        file_name: file.name, mime_type: file.type || "application/octet-stream",
+        file_size: file.size, signed_url: url, storage_path: "",
+        created_at: new Date().toISOString()
+      });
+    }
+    writeDemo(data);
+    return;
+  }
+  for (const file of files) {
+    const extension = file.name.includes(".") ? `.${file.name.split(".").pop().toLowerCase()}` : "";
+    const storagePath = `${clinicId}/${patientId}/${crypto.randomUUID()}${extension}`;
+    const { error: uploadError } = await supabase.storage
+      .from("patient-documents")
+      .upload(storagePath, file, { contentType: file.type || "application/octet-stream", upsert: false });
+    if (uploadError) throw uploadError;
+    const { error } = await supabase.from("patient_documents").insert({
+      clinic_id: clinicId, patient_id: patientId, category, comment,
+      file_name: file.name, mime_type: file.type || "application/octet-stream",
+      file_size: file.size, storage_path: storagePath
+    });
+    if (error) {
+      await supabase.storage.from("patient-documents").remove([storagePath]);
+      throw error;
+    }
+  }
+}
+
+export async function deleteDocument(document) {
+  if (!cloudEnabled) {
+    const data = readDemo();
+    data.documents = (data.documents || []).filter((item) => item.id !== document.id);
+    writeDemo(data);
+    return;
+  }
+  await supabase.storage.from("patient-documents").remove([document.storage_path]);
+  const { error } = await supabase.from("patient_documents").delete().eq("id", document.id);
   if (error) throw error;
 }
 
@@ -286,7 +347,7 @@ export async function deletePhoto(photo) {
 export function subscribeToClinic(clinicId, onChange) {
   if (!cloudEnabled) return () => {};
   const channel = supabase.channel(`clinic-${clinicId}`);
-  ["patients", "visits", "finance_transactions", "photo_records"].forEach((table) => {
+  ["patients", "visits", "finance_transactions", "photo_records", "patient_documents"].forEach((table) => {
     channel.on("postgres_changes", {
       event: "*", schema: "public", table, filter: `clinic_id=eq.${clinicId}`
     }, onChange);

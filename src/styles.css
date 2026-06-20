@@ -348,6 +348,30 @@ button:disabled { opacity: .55; cursor: wait; }
 .document-card p { flex: 1; margin: 0; color: var(--muted); line-height: 1.5; }
 .document-notice { display: flex; align-items: flex-start; gap: 8px; padding: 13px 15px; color: var(--orange); border: 1px solid rgba(189,116,57,.2); border-radius: 15px; background: rgba(189,116,57,.07); font-size: 12px; }
 .document-notice svg { width: 17px; min-width: 17px; }
+.recommendations-editor textarea { width: 100%; min-height: 340px; padding: 17px; color: inherit; border: 1px solid var(--line); border-radius: 16px; outline: none; background: white; line-height: 1.65; resize: vertical; }
+.recommendations-editor textarea:focus { border-color: var(--cure-gold); box-shadow: 0 0 0 4px color-mix(in srgb, var(--cure-gold) 10%, transparent); }
+.recommendations-editor > div { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-top: 13px; }
+.recommendations-editor > div > span { color: var(--muted); font-size: 11px; }
+.uploaded-documents-heading { margin-top: 22px; }
+.uploaded-documents { display: flex; flex-direction: column; gap: 9px; }
+.uploaded-document { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto 36px; gap: 12px; align-items: center; padding: 14px; border: 1px solid var(--line); border-radius: 17px; background: white; }
+.file-type { width: 50px; height: 50px; display: grid; place-items: center; color: var(--blue); border-radius: 13px; background: #e8f0f3; font-size: 10px; font-weight: 850; }
+.uploaded-document > div:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.uploaded-document > div:nth-child(2) strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uploaded-document > div:nth-child(2) span { color: var(--muted); font-size: 11px; }
+.uploaded-document > div:nth-child(2) p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+.document-actions { display: flex; gap: 7px; }
+.document-actions .secondary { min-height: 38px; padding: 8px 11px; font-size: 12px; }
+.document-actions svg { width: 16px; }
+.document-upload-zone { min-height: 210px; }
+.selected-document-files { display: flex; flex-direction: column; gap: 7px; }
+.selected-document-files > div { display: grid; grid-template-columns: 28px 1fr 32px; gap: 9px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 13px; background: white; }
+.selected-document-files > div > svg { color: var(--blue); }
+.selected-document-files span { display: flex; min-width: 0; flex-direction: column; }
+.selected-document-files strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.selected-document-files small { color: var(--muted); }
+.selected-document-files button { width: 30px; height: 30px; display: grid; place-items: center; color: var(--red); border-radius: 9px; background: transparent; }
+.selected-document-files button svg { width: 15px; }
 .info-row { display: flex; justify-content: space-between; gap: 18px; padding: 10px 0; border-bottom: 1px solid #edf1f3; font-size: 13px; }
 .info-row:last-child { border: 0; }
 .info-row span { color: var(--muted); }
@@ -456,6 +480,8 @@ button:disabled { opacity: .55; cursor: wait; }
   .charts-grid { grid-template-columns: 1fr; }
   .photo-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
   .documents-grid { grid-template-columns: 1fr; }
+  .uploaded-document { grid-template-columns: 48px minmax(0, 1fr) 36px; }
+  .document-actions { grid-column: 2 / -1; flex-wrap: wrap; }
 }
 
 @media (max-width: 540px) {
@@ -499,6 +525,9 @@ button:disabled { opacity: .55; cursor: wait; }
   .treatment-editor-actions { flex-wrap: wrap; }
   .treatment-editor-actions > span { display: none; }
   .treatment-editor-actions .danger-action { margin-right: auto; }
+  .recommendations-editor > div { align-items: stretch; flex-direction: column; }
+  .uploaded-document { grid-template-columns: 44px minmax(0, 1fr) 34px; }
+  .file-type { width: 42px; height: 42px; }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -1743,6 +1772,19 @@ select {
 .document-notice {
   color: #806344;
   border-color: var(--cure-border);
+  background: var(--cure-surface-soft);
+}
+
+.recommendations-editor textarea,
+.uploaded-document,
+.selected-document-files > div {
+  color: var(--cure-text);
+  border-color: var(--cure-border);
+  background: var(--cure-surface);
+}
+
+.file-type {
+  color: var(--cure-gold);
   background: var(--cure-surface-soft);
 }
 
