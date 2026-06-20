@@ -33,6 +33,9 @@ const age = (birthDate) => {
 };
 const safeDate = (value) => value ? shortDate.format(new Date(value)) : "—";
 const sum = (items, selector) => items.reduce((total, item) => total + Number(selector(item) || 0), 0);
+const treatmentItems = (patient) => Array.isArray(patient?.dental?.treatment_items)
+  ? patient.dental.treatment_items
+  : [];
 const isIncome = (t) => t.type === "Доход" || t.type === "Коррекция";
 const isExpense = (t) => t.type === "Расход" || t.type === "Возврат";
 const isDebt = (t) => t.type === "Долг";
@@ -485,7 +488,8 @@ function PatientsPage({ data, clinicId, refresh, openPatient, notify }) {
     return data.patients
       .filter((patient) => {
         const visits = data.visits.filter((v) => v.patient_id === patient.id);
-        const haystack = [patient.full_name, patient.phone, patient.dental?.diagnosis, patient.dental?.treatment_plan, ...visits.map((v) => v.treatment_type)].join(" ").toLowerCase();
+        const planItems = treatmentItems(patient).flatMap((item) => [item.name, item.teeth, item.notes, item.status]);
+        const haystack = [patient.full_name, patient.phone, patient.dental?.diagnosis, patient.dental?.treatment_plan, ...planItems, ...visits.map((v) => v.treatment_type)].join(" ").toLowerCase();
         return (!q || haystack.includes(q)) && (status === "Все" || patient.status === status);
       })
       .sort((a, b) => {
@@ -561,6 +565,7 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
   const [visitEditor, setVisitEditor] = useState(null);
   const [photoEditor, setPhotoEditor] = useState(false);
   const [txEditor, setTxEditor] = useState(false);
+  const [treatmentEditor, setTreatmentEditor] = useState(null);
   const [statusBusy, setStatusBusy] = useState(false);
   const finance = patientFinancials(patient.id, data);
   const visits = data.visits.filter((v) => v.patient_id === patient.id).sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -626,7 +631,15 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
         ))}
       </div>
 
-      {section === "Обзор" && <Overview patient={patient} visits={visits} finance={finance} />}
+      {section === "Обзор" && (
+        <Overview
+          patient={patient}
+          visits={visits}
+          finance={finance}
+          onAddTreatment={() => setTreatmentEditor({})}
+          onEditTreatment={setTreatmentEditor}
+        />
+      )}
       {section === "Анамнез" && <Anamnesis patient={patient} />}
       {section === "Лечение" && (
         <VisitsSection visits={visits} onAdd={() => setVisitEditor({})} onEdit={setVisitEditor} />
@@ -645,13 +658,28 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
       {visitEditor && <VisitEditor patient={patient} visit={visitEditor.id ? visitEditor : null} clinicId={clinicId} onClose={() => setVisitEditor(null)} onSaved={async () => { await refresh(); setVisitEditor(null); notify("Визит сохранён"); }} />}
       {photoEditor && <PhotoUploader patient={patient} visits={visits} clinicId={clinicId} onClose={() => setPhotoEditor(false)} onSaved={async () => { await refresh(); setPhotoEditor(false); notify("Фотографии добавлены"); }} />}
       {txEditor && <TransactionEditor patients={data.patients} visits={data.visits} presetPatient={patient} clinicId={clinicId} onClose={() => setTxEditor(false)} onSaved={async () => { await refresh(); setTxEditor(false); notify("Финансовая запись сохранена"); }} />}
+      {treatmentEditor && (
+        <TreatmentPlanEditor
+          patient={patient}
+          item={treatmentEditor.id ? treatmentEditor : null}
+          clinicId={clinicId}
+          onClose={() => setTreatmentEditor(null)}
+          onSaved={async (message) => {
+            await refresh();
+            setTreatmentEditor(null);
+            notify(message);
+          }}
+        />
+      )}
     </section>
   );
 }
 
-function Overview({ patient, visits, finance }) {
+function Overview({ patient, visits, finance, onAddTreatment, onEditTreatment }) {
   const latest = visits[0];
   const next = visits.filter((v) => v.next_visit_date && new Date(v.next_visit_date) >= new Date()).sort((a, b) => new Date(a.next_visit_date) - new Date(b.next_visit_date))[0];
+  const plan = treatmentItems(patient);
+  const planTotal = sum(plan.filter((item) => item.status !== "Отменено"), (item) => item.price);
   return (
     <div className="detail-grid">
       <InfoCard title="Основные данные" icon={<UserRound />}>
@@ -660,9 +688,46 @@ function Overview({ patient, visits, finance }) {
         <InfoRow label="Последний визит" value={latest ? safeDate(latest.date) : "—"} />
         <InfoRow label="Следующий визит" value={next ? safeDate(next.next_visit_date) : "Не назначен"} />
       </InfoCard>
-      <InfoCard title="Текущий план" icon={<Stethoscope />}>
-        <p>{patient.dental?.treatment_plan || "План лечения пока не заполнен."}</p>
-      </InfoCard>
+      <article className="info-card treatment-plan-card">
+        <header>
+          <Stethoscope />
+          <h3>План лечения</h3>
+          <button className="treatment-add" onClick={onAddTreatment} aria-label="Добавить пункт плана лечения" title="Добавить пункт">
+            <Plus />
+          </button>
+        </header>
+        <div>
+          {patient.dental?.treatment_plan && <p className="treatment-plan-note">{patient.dental.treatment_plan}</p>}
+          {plan.length ? (
+            <>
+              <div className="treatment-plan-list">
+                {plan.map((item, index) => (
+                  <button className="treatment-plan-item" key={item.id} onClick={() => onEditTreatment(item)}>
+                    <span className="treatment-plan-number">{index + 1}</span>
+                    <span className="treatment-plan-content">
+                      <strong>{item.name}</strong>
+                      <small>
+                        {[item.teeth && `Зуб / область: ${item.teeth}`, item.status || "Запланировано"].filter(Boolean).join(" · ")}
+                      </small>
+                    </span>
+                    <span className="treatment-plan-price">{money.format(item.price || 0)}</span>
+                    <Edit3 className="treatment-plan-edit" />
+                  </button>
+                ))}
+              </div>
+              <div className="treatment-plan-total">
+                <span>Итого по плану</span>
+                <strong>{money.format(planTotal)}</strong>
+              </div>
+            </>
+          ) : (
+            <button className="treatment-plan-empty" onClick={onAddTreatment}>
+              <Plus />
+              <span>Добавить первый этап лечения</span>
+            </button>
+          )}
+        </div>
+      </article>
       <InfoCard title="Клинический статус" icon={<Activity />}>
         <InfoRow label="Диагноз" value={patient.dental?.diagnosis || "—"} />
         <InfoRow label="FDI" value={patient.dental?.fdi_teeth || "—"} />
@@ -670,6 +735,87 @@ function Overview({ patient, visits, finance }) {
         <InfoRow label="Финансовый статус" value={finance.debt > 0 ? `Долг ${money.format(finance.debt)}` : "Оплачено"} />
       </InfoCard>
     </div>
+  );
+}
+
+function TreatmentPlanEditor({ patient, item, clinicId, onClose, onSaved }) {
+  const [form, setForm] = useState(item ? structuredClone(item) : {
+    name: "", teeth: "", price: "", status: "Запланировано", notes: ""
+  });
+  const [busy, setBusy] = useState(false);
+  const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+
+  const persist = async (nextItems, message) => {
+    setBusy(true);
+    try {
+      await savePatient(clinicId, {
+        ...patient,
+        dental: { ...(patient.dental || {}), treatment_items: nextItems }
+      });
+      await onSaved(message);
+    } catch (error) {
+      alert(error.message || "Не удалось сохранить план лечения");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submit = async (event) => {
+    event.preventDefault();
+    const name = form.name.trim();
+    const price = Number(form.price || 0);
+    if (!name) return alert("Напишите, что нужно сделать");
+    if (price < 0) return alert("Цена не может быть отрицательной");
+    const nextItem = {
+      ...form,
+      id: item?.id || uuid(),
+      name,
+      teeth: form.teeth.trim(),
+      notes: form.notes.trim(),
+      price
+    };
+    const currentItems = treatmentItems(patient);
+    const nextItems = item
+      ? currentItems.map((current) => current.id === item.id ? nextItem : current)
+      : [...currentItems, nextItem];
+    await persist(nextItems, item ? "Этап лечения обновлён" : "Этап лечения добавлен");
+  };
+
+  const remove = async () => {
+    if (!item || !confirm(`Удалить из плана «${item.name}»?`)) return;
+    await persist(treatmentItems(patient).filter((current) => current.id !== item.id), "Этап лечения удалён");
+  };
+
+  return (
+    <Modal title={item ? "Изменить этап лечения" : "Новый этап лечения"} onClose={onClose}>
+      <form onSubmit={submit}>
+        <div className="form-grid">
+          <Field label="Что делаем *" full>
+            <input value={form.name} onChange={(event) => set("name", event.target.value)} placeholder="Например: лечение кариеса" autoFocus />
+          </Field>
+          <Field label="Зуб / область">
+            <input value={form.teeth || ""} onChange={(event) => set("teeth", event.target.value)} placeholder="Например: 16" />
+          </Field>
+          <Field label="Цена">
+            <input type="number" min="0" step="1" inputMode="decimal" value={form.price} onChange={(event) => set("price", event.target.value)} placeholder="0" />
+          </Field>
+          <Field label="Статус" full>
+            <select value={form.status} onChange={(event) => set("status", event.target.value)}>
+              {["Запланировано", "В процессе", "Выполнено", "Отменено"].map((status) => <option key={status}>{status}</option>)}
+            </select>
+          </Field>
+          <Field label="Комментарий" full>
+            <textarea value={form.notes || ""} onChange={(event) => set("notes", event.target.value)} placeholder="Материалы, последовательность или другие детали" />
+          </Field>
+        </div>
+        <div className="modal-actions treatment-editor-actions">
+          {item && <button type="button" className="danger-action" disabled={busy} onClick={remove}><Trash2 />Удалить</button>}
+          <span />
+          <button type="button" className="secondary" disabled={busy} onClick={onClose}>Отмена</button>
+          <button className="primary" disabled={busy}>{busy ? "Сохранение…" : "Сохранить"}</button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

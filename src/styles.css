@@ -236,6 +236,48 @@ button:disabled { opacity: .55; cursor: wait; }
 .info-card > header { display: flex; align-items: center; gap: 9px; margin-bottom: 15px; color: var(--blue); }
 .info-card > header h3 { color: #24363e; margin: 0; }
 .info-card > div > p { line-height: 1.55; margin-bottom: 0; }
+.treatment-plan-card { grid-column: 1 / -1; }
+.treatment-plan-card > header h3 { flex: 1; }
+.treatment-add {
+  width: 38px; height: 38px; display: grid; place-items: center; padding: 0;
+  border-radius: 50%; color: white; background: var(--blue);
+}
+.treatment-add svg { width: 19px; }
+.treatment-plan-note { margin: 0 0 14px !important; color: var(--muted); white-space: pre-wrap; }
+.treatment-plan-list { display: flex; flex-direction: column; gap: 8px; }
+.treatment-plan-item {
+  width: 100%; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto 20px;
+  gap: 11px; align-items: center; padding: 12px; text-align: left;
+  border: 1px solid var(--line); border-radius: 15px; background: white;
+}
+.treatment-plan-item:hover { border-color: #abc9d5; }
+.treatment-plan-number {
+  width: 30px; height: 30px; display: grid; place-items: center;
+  border-radius: 50%; color: var(--blue); background: #e7f0f4; font-size: 12px; font-weight: 800;
+}
+.treatment-plan-content { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.treatment-plan-content strong { overflow: hidden; text-overflow: ellipsis; }
+.treatment-plan-content small { color: var(--muted); }
+.treatment-plan-price { font-weight: 750; white-space: nowrap; }
+.treatment-plan-edit { width: 16px; color: var(--muted); }
+.treatment-plan-total {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  margin-top: 13px; padding-top: 14px; border-top: 1px solid var(--line);
+}
+.treatment-plan-total span { color: var(--muted); }
+.treatment-plan-total strong { font-size: 18px; }
+.treatment-plan-empty {
+  width: 100%; min-height: 88px; display: flex; align-items: center; justify-content: center; gap: 9px;
+  border: 1px dashed #c9d9df; border-radius: 16px; color: var(--blue); background: rgba(255,255,255,.45);
+  font-weight: 700;
+}
+.treatment-plan-empty svg { width: 20px; }
+.treatment-editor-actions > span { flex: 1; }
+.danger-action {
+  display: inline-flex; align-items: center; gap: 7px; padding: 10px 13px;
+  color: var(--red); background: transparent; font-weight: 700;
+}
+.danger-action svg { width: 17px; }
 .info-row { display: flex; justify-content: space-between; gap: 18px; padding: 10px 0; border-bottom: 1px solid #edf1f3; font-size: 13px; }
 .info-row:last-child { border: 0; }
 .info-row span { color: var(--muted); }
@@ -377,6 +419,12 @@ button:disabled { opacity: .55; cursor: wait; }
   .form-tabs { top: -16px; }
   .modal-actions { margin: 18px -16px -16px; }
   .lightbox-panel { flex-wrap: wrap; }
+  .treatment-plan-item { grid-template-columns: 30px minmax(0, 1fr) auto; }
+  .treatment-plan-edit { display: none; }
+  .treatment-plan-price { grid-column: 2 / -1; }
+  .treatment-editor-actions { flex-wrap: wrap; }
+  .treatment-editor-actions > span { display: none; }
+  .treatment-editor-actions .danger-action { margin-right: auto; }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -1263,6 +1311,43 @@ select {
 .info-card > header h3 {
   color: var(--cure-text);
   font-weight: 620;
+}
+
+.treatment-add {
+  color: #FFFFFF;
+  background: var(--cure-gold);
+}
+
+.treatment-plan-item {
+  border-color: var(--cure-border);
+  background: var(--cure-surface);
+}
+
+.treatment-plan-item:hover {
+  border-color: var(--cure-gold-light);
+  box-shadow: 0 8px 22px var(--cure-shadow);
+}
+
+.treatment-plan-number {
+  color: var(--cure-gold);
+  background: var(--cure-surface-soft);
+}
+
+.treatment-plan-note,
+.treatment-plan-content small,
+.treatment-plan-total span,
+.treatment-plan-edit {
+  color: var(--cure-text-muted);
+}
+
+.treatment-plan-total {
+  border-color: var(--cure-border);
+}
+
+.treatment-plan-empty {
+  color: var(--cure-gold);
+  border-color: var(--cure-border);
+  background: var(--cure-surface-soft);
 }
 
 .info-row {
