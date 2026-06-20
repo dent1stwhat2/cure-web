@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity, ArrowDownLeft, ArrowUpRight, BarChart3, CalendarDays, Camera,
-  Check, ChevronLeft, CircleDollarSign, Cloud, Download, Edit3, FileText,
+  Check, ChevronLeft, ChevronRight, CircleDollarSign, Clock, Cloud, Download, Edit3, FileText,
   Filter, Image as ImageIcon, LockKeyhole, LogOut, Menu, MoreHorizontal,
   Phone, Plus, RefreshCw, Search, Settings, ShieldCheck, Stethoscope,
+  AlertTriangle, ClipboardList, History, LayoutDashboard, Sparkles,
   Trash2, Upload, UserRound, Users, WalletCards, X
 } from "lucide-react";
 import {
@@ -36,6 +37,21 @@ const sum = (items, selector) => items.reduce((total, item) => total + Number(se
 const treatmentItems = (patient) => Array.isArray(patient?.dental?.treatment_items)
   ? patient.dental.treatment_items
   : [];
+const toothChart = (patient) => patient?.dental?.tooth_chart || {};
+const sameDay = (left, right) => {
+  const a = new Date(left);
+  const b = new Date(right);
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+};
+const timeLabel = (value) => new Date(value).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+const treatmentTemplates = [
+  { name: "Лечение кариеса", price: 0, notes: "Препарирование, медикаментозная обработка, восстановление анатомической формы." },
+  { name: "Профессиональная гигиена", price: 0, notes: "Удаление зубных отложений, полировка, рекомендации по домашней гигиене." },
+  { name: "Эндодонтическое лечение", price: 0, notes: "Обработка и пломбирование корневых каналов." },
+  { name: "Удаление зуба", price: 0, notes: "Хирургический этап и послеоперационные рекомендации." },
+  { name: "Имплантация", price: 0, notes: "Хирургический этап установки имплантата." },
+  { name: "Ортопедический этап", price: 0, notes: "Подготовка, снятие оттисков/сканирование и фиксация конструкции." }
+];
 const isIncome = (t) => t.type === "Доход" || t.type === "Коррекция";
 const isExpense = (t) => t.type === "Расход" || t.type === "Возврат";
 const isDebt = (t) => t.type === "Долг";
@@ -418,7 +434,7 @@ function ClinicOnboarding({ session, onJoined, onMessage }) {
 }
 
 function ClinicApp({ session, membership, data, refresh, notify }) {
-  const [route, setRoute] = useState("patients");
+  const [route, setRoute] = useState("today");
   const [selectedId, setSelectedId] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const selectedPatient = data.patients.find((p) => p.id === selectedId);
@@ -430,6 +446,10 @@ function ClinicApp({ session, membership, data, refresh, notify }) {
   };
   const goBack = () => {
     setRoute("patients");
+    setSelectedId(null);
+  };
+  const goToday = () => {
+    setRoute("today");
     setSelectedId(null);
   };
 
@@ -447,6 +467,9 @@ function ClinicApp({ session, membership, data, refresh, notify }) {
       </header>
 
       <main className="app-content">
+        {route === "today" && (
+          <TodayPage data={data} openPatient={openPatient} />
+        )}
         {route === "patients" && (
           <PatientsPage data={data} clinicId={membership.clinic_id} refresh={refresh} openPatient={openPatient} notify={notify} />
         )}
@@ -456,11 +479,20 @@ function ClinicApp({ session, membership, data, refresh, notify }) {
         {route === "finance" && (
           <FinancePage data={data} clinicId={membership.clinic_id} refresh={refresh} notify={notify} />
         )}
+        {route === "calendar" && (
+          <CalendarPage data={data} clinicId={membership.clinic_id} refresh={refresh} notify={notify} openPatient={openPatient} />
+        )}
       </main>
 
       <nav className="tabbar">
+        <button className={route === "today" ? "active" : ""} onClick={goToday}>
+          <LayoutDashboard /><span>Сегодня</span>
+        </button>
         <button className={route === "patients" || route === "patient" ? "active" : ""} onClick={goBack}>
           <Users /><span>Пациенты</span>
+        </button>
+        <button className={route === "calendar" ? "active" : ""} onClick={() => { setRoute("calendar"); setSelectedId(null); }}>
+          <CalendarDays /><span>Календарь</span>
         </button>
         <button className={route === "finance" ? "active" : ""} onClick={() => setRoute("finance")}>
           <BarChart3 /><span>Финансы</span>
@@ -474,6 +506,132 @@ function ClinicApp({ session, membership, data, refresh, notify }) {
         />
       )}
     </div>
+  );
+}
+
+function TodayPage({ data, openPatient }) {
+  const now = new Date();
+  const appointments = data.visits
+    .filter((visit) => sameDay(visit.date, now))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+  const upcoming = data.visits
+    .filter((visit) => new Date(visit.date) > now)
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .slice(0, 5);
+  const activePlans = data.patients.filter((patient) =>
+    treatmentItems(patient).some((item) => !["Выполнено", "Отменено"].includes(item.status))
+  );
+  const riskyPatients = data.patients.filter((patient) => patientWarnings(patient).length);
+
+  return (
+    <section>
+      <PageHeader
+        title="Сегодня"
+        subtitle={now.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}
+      />
+      <div className="today-metrics">
+        <Metric title="Приёмов сегодня" value={appointments.length} icon={<CalendarDays />} />
+        <Metric title="Активных планов" value={activePlans.length} icon={<ClipboardList />} />
+        <Metric title="Пациентов с рисками" value={riskyPatients.length} tone={riskyPatients.length ? "red" : "green"} icon={<AlertTriangle />} />
+      </div>
+      <div className="today-layout">
+        <div className="section-block">
+          <div className="section-heading"><div><h2>Расписание дня</h2><p>{appointments.length ? `${appointments.length} приёмов` : "Свободный день"}</p></div></div>
+          {appointments.length ? appointments.map((visit) => {
+            const patient = data.patients.find((item) => item.id === visit.patient_id);
+            if (!patient) return null;
+            const warnings = patientWarnings(patient);
+            return (
+              <button className="appointment-card" key={visit.id} onClick={() => openPatient(patient.id)}>
+                <span className="appointment-time">{timeLabel(visit.date)}</span>
+                <span className="appointment-main">
+                  <strong>{patient.full_name}</strong>
+                  <small>{visit.treatment_type} · {visit.teeth || "Область не указана"}</small>
+                  {warnings.length > 0 && <em><AlertTriangle />{warnings[0]}</em>}
+                </span>
+                <ChevronRight />
+              </button>
+            );
+          }) : <Empty icon={<CalendarDays />} title="Сегодня приёмов нет" text="Будущие визиты появятся здесь автоматически." />}
+        </div>
+        <div className="section-block">
+          <div className="section-heading"><div><h2>Ближайшие визиты</h2><p>Следующие записи</p></div></div>
+          <div className="upcoming-list">
+            {upcoming.length ? upcoming.map((visit) => {
+              const patient = data.patients.find((item) => item.id === visit.patient_id);
+              return patient && (
+                <button key={visit.id} onClick={() => openPatient(patient.id)}>
+                  <span>{safeDate(visit.date)} · {timeLabel(visit.date)}</span>
+                  <strong>{patient.full_name}</strong>
+                  <small>{visit.treatment_type}</small>
+                </button>
+              );
+            }) : <p className="muted">Будущих визитов пока нет.</p>}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CalendarPage({ data, clinicId, refresh, notify, openPatient }) {
+  const [selectedDate, setSelectedDate] = useState(todayISO());
+  const [editorPatient, setEditorPatient] = useState(null);
+  const days = Array.from({ length: 14 }, (_, index) => {
+    const date = new Date();
+    date.setDate(date.getDate() + index);
+    return date;
+  });
+  const visits = data.visits
+    .filter((visit) => sameDay(visit.date, selectedDate))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  return (
+    <section>
+      <PageHeader title="Календарь" subtitle="Ближайшие 14 дней">
+        <select className="simple-select" value={editorPatient?.id || ""} onChange={(event) => setEditorPatient(data.patients.find((p) => p.id === event.target.value) || null)}>
+          <option value="">+ Назначить визит</option>
+          {data.patients.map((patient) => <option value={patient.id} key={patient.id}>{patient.full_name}</option>)}
+        </select>
+      </PageHeader>
+      <div className="calendar-strip">
+        {days.map((date) => {
+          const iso = date.toISOString().slice(0, 10);
+          const count = data.visits.filter((visit) => sameDay(visit.date, date)).length;
+          return (
+            <button key={iso} className={selectedDate === iso ? "active" : ""} onClick={() => setSelectedDate(iso)}>
+              <small>{date.toLocaleDateString("ru-RU", { weekday: "short" })}</small>
+              <strong>{date.getDate()}</strong>
+              <span>{count || ""}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="section-heading calendar-heading">
+        <div><h2>{safeDate(selectedDate)}</h2><p>{visits.length} записей</p></div>
+      </div>
+      <div className="calendar-day">
+        {visits.length ? visits.map((visit) => {
+          const patient = data.patients.find((item) => item.id === visit.patient_id);
+          return patient && (
+            <button className="appointment-card" key={visit.id} onClick={() => openPatient(patient.id)}>
+              <span className="appointment-time">{timeLabel(visit.date)}</span>
+              <span className="appointment-main"><strong>{patient.full_name}</strong><small>{visit.treatment_type} · {visit.visit_kind || "Визит"}</small></span>
+              <ChevronRight />
+            </button>
+          );
+        }) : <Empty icon={<CalendarDays />} title="Записей нет" text="Выберите пациента сверху, чтобы назначить визит." />}
+      </div>
+      {editorPatient && (
+        <VisitEditor
+          patient={editorPatient}
+          presetDate={`${selectedDate}T09:00`}
+          clinicId={clinicId}
+          onClose={() => setEditorPatient(null)}
+          onSaved={async () => { await refresh(); setEditorPatient(null); notify("Визит назначен"); }}
+        />
+      )}
+    </section>
   );
 }
 
@@ -566,10 +724,12 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
   const [photoEditor, setPhotoEditor] = useState(false);
   const [txEditor, setTxEditor] = useState(false);
   const [treatmentEditor, setTreatmentEditor] = useState(null);
+  const [toothEditor, setToothEditor] = useState(null);
   const [statusBusy, setStatusBusy] = useState(false);
   const finance = patientFinancials(patient.id, data);
   const visits = data.visits.filter((v) => v.patient_id === patient.id).sort((a, b) => new Date(b.date) - new Date(a.date));
   const photos = data.photos.filter((p) => p.patient_id === patient.id);
+  const warnings = patientWarnings(patient);
 
   const remove = async () => {
     if (!confirm("Удалить пациента, все визиты, финансы и фотографии безвозвратно?")) return;
@@ -603,6 +763,11 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
           <button className="icon-button danger-ghost" onClick={remove}><Trash2 /></button>
         </div>
       </div>
+      {warnings.length > 0 && (
+        <div className="clinical-alerts">
+          {warnings.map((warning) => <div key={warning}><AlertTriangle /><span>{warning}</span></div>)}
+        </div>
+      )}
       <div className="patient-hero card">
         <div>
           <p className="eyebrow">КАРТОЧКА ПАЦИЕНТА</p>
@@ -625,8 +790,14 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
           <Metric title="Чистая выручка" value={money.format(finance.net)} icon={<WalletCards />} />
         </div>
       </div>
+      <div className="quick-actions">
+        <button onClick={() => setVisitEditor({})}><CalendarDays /><span>Новый визит</span></button>
+        <button onClick={() => setTreatmentEditor({})}><ClipboardList /><span>В план</span></button>
+        <button onClick={() => setPhotoEditor(true)}><Camera /><span>Фото</span></button>
+        <button onClick={() => setTxEditor(true)}><WalletCards /><span>Оплата</span></button>
+      </div>
       <div className="chip-scroll">
-        {["Обзор", "Анамнез", "Лечение", "Финансы", "Фото", "Заметки"].map((item) => (
+        {["Обзор", "Зубная формула", "История", "Анамнез", "Лечение", "Финансы", "Фото", "Заметки"].map((item) => (
           <button key={item} className={section === item ? "active" : ""} onClick={() => setSection(item)}>{item}</button>
         ))}
       </div>
@@ -641,6 +812,12 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
         />
       )}
       {section === "Анамнез" && <Anamnesis patient={patient} />}
+      {section === "Зубная формула" && (
+        <DentalChart patient={patient} onSelect={setToothEditor} />
+      )}
+      {section === "История" && (
+        <PatientTimeline patient={patient} data={data} />
+      )}
       {section === "Лечение" && (
         <VisitsSection visits={visits} onAdd={() => setVisitEditor({})} onEdit={setVisitEditor} />
       )}
@@ -669,6 +846,15 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
             setTreatmentEditor(null);
             notify(message);
           }}
+        />
+      )}
+      {toothEditor && (
+        <ToothEditor
+          patient={patient}
+          tooth={toothEditor}
+          clinicId={clinicId}
+          onClose={() => setToothEditor(null)}
+          onSaved={async () => { await refresh(); setToothEditor(null); notify("Зубная формула обновлена"); }}
         />
       )}
     </section>
@@ -769,6 +955,8 @@ function TreatmentPlanEditor({ patient, item, clinicId, onClose, onSaved }) {
     const nextItem = {
       ...form,
       id: item?.id || uuid(),
+      created_at: item?.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
       name,
       teeth: form.teeth.trim(),
       notes: form.notes.trim(),
@@ -789,6 +977,16 @@ function TreatmentPlanEditor({ patient, item, clinicId, onClose, onSaved }) {
   return (
     <Modal title={item ? "Изменить этап лечения" : "Новый этап лечения"} onClose={onClose}>
       <form onSubmit={submit}>
+        {!item && (
+          <div className="template-picker">
+            <span><Sparkles />Быстрый шаблон</span>
+            <div>{treatmentTemplates.map((template) => (
+              <button type="button" key={template.name} onClick={() => setForm((current) => ({ ...current, ...template }))}>
+                {template.name}
+              </button>
+            ))}</div>
+          </div>
+        )}
         <div className="form-grid">
           <Field label="Что делаем *" full>
             <input value={form.name} onChange={(event) => set("name", event.target.value)} placeholder="Например: лечение кариеса" autoFocus />
@@ -816,6 +1014,112 @@ function TreatmentPlanEditor({ patient, item, clinicId, onClose, onSaved }) {
         </div>
       </form>
     </Modal>
+  );
+}
+
+function DentalChart({ patient, onSelect }) {
+  const chart = toothChart(patient);
+  const rows = [
+    ["Верхняя челюсть", ["18", "17", "16", "15", "14", "13", "12", "11", "21", "22", "23", "24", "25", "26", "27", "28"]],
+    ["Нижняя челюсть", ["48", "47", "46", "45", "44", "43", "42", "41", "31", "32", "33", "34", "35", "36", "37", "38"]]
+  ];
+  return (
+    <div className="section-block dental-chart-section">
+      <div className="section-heading"><div><h2>Зубная формула</h2><p>Нажмите на зуб, чтобы указать состояние</p></div></div>
+      <div className="dental-chart card">
+        {rows.map(([label, teeth]) => (
+          <div className="jaw-row" key={label}>
+            <span>{label}</span>
+            <div>{teeth.map((number) => {
+              const record = chart[number];
+              return (
+                <button key={number} className={`tooth ${record?.status ? `tooth-${record.status}` : ""}`} onClick={() => onSelect(number)}>
+                  <strong>{number}</strong>
+                  <small>{record?.short || record?.status || "Здоров"}</small>
+                </button>
+              );
+            })}</div>
+          </div>
+        ))}
+        <div className="tooth-legend">
+          {["Кариес", "Пломба", "Коронка", "Имплантат", "Канал", "Удалён"].map((status) => <span key={status} className={`tooth-${status}`}>{status}</span>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ToothEditor({ patient, tooth, clinicId, onClose, onSaved }) {
+  const existing = toothChart(patient)[tooth] || {};
+  const [form, setForm] = useState({
+    status: existing.status || "Здоров",
+    diagnosis: existing.diagnosis || "",
+    note: existing.note || ""
+  });
+  const [busy, setBusy] = useState(false);
+  const save = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const nextChart = { ...toothChart(patient) };
+      if (form.status === "Здоров" && !form.diagnosis.trim() && !form.note.trim()) delete nextChart[tooth];
+      else nextChart[tooth] = { ...form, updated_at: new Date().toISOString() };
+      await savePatient(clinicId, { ...patient, dental: { ...(patient.dental || {}), tooth_chart: nextChart } });
+      await onSaved();
+    } catch (error) {
+      alert(error.message || "Не удалось сохранить состояние зуба");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title={`Зуб ${tooth}`} onClose={onClose}>
+      <form onSubmit={save}>
+        <div className="form-grid">
+          <Field label="Состояние" full>
+            <select value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}>
+              {["Здоров", "Кариес", "Пломба", "Коронка", "Имплантат", "Канал", "Удалён", "Наблюдение"].map((status) => <option key={status}>{status}</option>)}
+            </select>
+          </Field>
+          <Field label="Диагноз" full><input value={form.diagnosis} onChange={(event) => setForm((current) => ({ ...current, diagnosis: event.target.value }))} /></Field>
+          <Field label="Комментарий" full><textarea value={form.note} onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))} /></Field>
+        </div>
+        <ModalActions busy={busy} onCancel={onClose} />
+      </form>
+    </Modal>
+  );
+}
+
+function PatientTimeline({ patient, data }) {
+  const items = [
+    ...data.visits.filter((visit) => visit.patient_id === patient.id).map((visit) => ({
+      id: `visit-${visit.id}`, date: visit.date, icon: <Stethoscope />,
+      title: visit.treatment_type, text: visit.procedure_description || visit.diagnosis || "Визит"
+    })),
+    ...data.transactions.filter((transaction) => transaction.patient_id === patient.id).map((transaction) => ({
+      id: `tx-${transaction.id}`, date: transaction.date, icon: <WalletCards />,
+      title: `${transaction.type}: ${money.format(transaction.amount)}`, text: transaction.category
+    })),
+    ...data.photos.filter((photo) => photo.patient_id === patient.id).map((photo) => ({
+      id: `photo-${photo.id}`, date: photo.created_at, icon: <Camera />,
+      title: "Добавлена фотография", text: photo.category
+    })),
+    ...treatmentItems(patient).map((item) => ({
+      id: `plan-${item.id}`, date: item.updated_at || item.created_at || patient.updated_at, icon: <ClipboardList />,
+      title: `План: ${item.name}`, text: `${item.status || "Запланировано"} · ${money.format(item.price || 0)}`
+    }))
+  ].filter((item) => item.date).sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  return (
+    <div className="section-block">
+      <div className="section-heading"><div><h2>История пациента</h2><p>Все события в одном месте</p></div></div>
+      {items.length ? <div className="timeline">{items.map((item) => (
+        <div className="timeline-item" key={item.id}>
+          <div className="timeline-icon">{item.icon}</div>
+          <div><time>{safeDate(item.date)}{String(item.date).includes("T") ? ` · ${timeLabel(item.date)}` : ""}</time><strong>{item.title}</strong><p>{item.text}</p></div>
+        </div>
+      ))}</div> : <Empty icon={<History />} title="История пока пуста" text="Визиты, фотографии, оплаты и планы лечения появятся здесь автоматически." />}
+    </div>
   );
 }
 
@@ -1081,9 +1385,9 @@ function PatientEditor({ patient, clinicId, onClose, onSaved }) {
   );
 }
 
-function VisitEditor({ patient, visit, clinicId, onClose, onSaved }) {
+function VisitEditor({ patient, visit, presetDate, clinicId, onClose, onSaved }) {
   const [form, setForm] = useState(visit ? structuredClone(visit) : {
-    patient_id: patient.id, date: new Date().toISOString().slice(0, 16), teeth: "",
+    patient_id: patient.id, date: presetDate || new Date().toISOString().slice(0, 16), teeth: "",
     visit_kind: "Первичный визит", treatment_type: "Консультация", complaint: "", diagnosis: "", procedure_description: "",
     materials: "", anesthesia: "", recommendations: "", doctor_notes: "",
     total_cost: 0, paid_amount: 0, discount: 0, refund: 0, next_visit_date: ""
@@ -1250,6 +1554,20 @@ function TransactionsList({ transactions, patients = [], onDelete }) {
       </div>
     );
   })}</div>;
+}
+
+function patientWarnings(patient) {
+  const anamnesis = patient.anamnesis || {};
+  const warnings = [];
+  if (anamnesis.allergies) warnings.push(`Аллергия: ${anamnesis.allergies}`);
+  if (anamnesis.drug_intolerance) warnings.push(`Непереносимость: ${anamnesis.drug_intolerance}`);
+  if (anamnesis.anticoagulants) warnings.push("Принимает антикоагулянты");
+  if (anamnesis.pregnancy) warnings.push("Беременность / лактация");
+  if (anamnesis.diabetes) warnings.push("Сахарный диабет");
+  if (anamnesis.cardiovascular) warnings.push("Сердечно-сосудистые заболевания");
+  if (anamnesis.hypertension) warnings.push("Артериальная гипертензия");
+  if (anamnesis.contraindications) warnings.push(`Противопоказания: ${anamnesis.contraindications}`);
+  return warnings;
 }
 
 function patientFinancials(patientId, data) {
