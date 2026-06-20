@@ -93,6 +93,8 @@ export async function loadClinicData(clinicId) {
 
 export async function savePatient(clinicId, patient) {
   const clean = { ...patient, clinic_id: clinicId, updated_at: new Date().toISOString() };
+  clean.birth_date = clean.birth_date || null;
+  clean.first_visit_date = clean.first_visit_date || null;
   delete clean.age;
   if (!cloudEnabled) {
     const data = readDemo();
@@ -183,6 +185,7 @@ export async function deleteDocument(document) {
 
 export async function saveVisit(clinicId, visit) {
   const clean = { ...visit, clinic_id: clinicId, updated_at: new Date().toISOString() };
+  clean.next_visit_date = clean.next_visit_date || null;
   if (!cloudEnabled) {
     const data = readDemo();
     const index = data.visits.findIndex((v) => v.id === clean.id);
