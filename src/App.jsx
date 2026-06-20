@@ -144,7 +144,8 @@ function Splash({ label = "CURE" }) {
 function BrandMark({ small = false }) {
   return (
     <div className={`brand-mark ${small ? "small" : ""}`}>
-      <span />
+      <span className="logo-main">CURE</span>
+      <span className="logo-sub">CLINIC</span>
     </div>
   );
 }
@@ -434,7 +435,7 @@ function ClinicApp({ session, membership, data, refresh, notify }) {
       <header className="topbar">
         <div className="brand-inline" onClick={goBack}>
           <BrandMark small />
-          <div><strong>CURE</strong><span>{data.clinic.name}</span></div>
+          <div><span>{data.clinic.name}</span></div>
         </div>
         <div className="sync-state"><span className={cloudEnabled ? "online" : "demo"} />{cloudEnabled ? "Синхронизировано" : "Демо-режим"}</div>
         <button className="icon-button avatar" onClick={() => setSettingsOpen(true)} aria-label="Настройки">
@@ -560,6 +561,7 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
   const [visitEditor, setVisitEditor] = useState(null);
   const [photoEditor, setPhotoEditor] = useState(false);
   const [txEditor, setTxEditor] = useState(false);
+  const [statusBusy, setStatusBusy] = useState(false);
   const finance = patientFinancials(patient.id, data);
   const visits = data.visits.filter((v) => v.patient_id === patient.id).sort((a, b) => new Date(b.date) - new Date(a.date));
   const photos = data.photos.filter((p) => p.patient_id === patient.id);
@@ -570,6 +572,20 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
     await refresh();
     notify("Пациент удалён");
     back();
+  };
+
+  const changeStatus = async (nextStatus) => {
+    if (nextStatus === patient.status) return;
+    setStatusBusy(true);
+    try {
+      await savePatient(clinicId, { ...patient, status: nextStatus });
+      await refresh();
+      notify(`Статус изменён: ${nextStatus}`);
+    } catch (error) {
+      notify(error.message || "Не удалось изменить статус");
+    } finally {
+      setStatusBusy(false);
+    }
   };
 
   return (
@@ -587,12 +603,21 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
           <p className="eyebrow">КАРТОЧКА ПАЦИЕНТА</p>
           <h1>{patient.full_name}</h1>
           <p>{age(patient.birth_date)} лет · {patient.phone || "Телефон не указан"}</p>
-          <StatusBadge status={finance.debt > 0 ? "Должник" : patient.status} />
+          <div className="patient-status-control">
+            <StatusBadge status={finance.debt > 0 ? "Должник" : patient.status} />
+            <label>
+              <span>Статус лечения</span>
+              <select value={patient.status} disabled={statusBusy} onChange={(event) => changeStatus(event.target.value)}>
+                {["Новый", "На лечении", "Завершён", "Контроль", "Должник", "Архив"].map((status) => <option key={status}>{status}</option>)}
+              </select>
+            </label>
+          </div>
         </div>
         <div className="metric-grid compact">
           <Metric title="Стоимость" value={money.format(finance.cost)} icon={<FileText />} />
           <Metric title="Оплачено" value={money.format(finance.paid)} tone="green" icon={<Check />} />
           <Metric title="Долг" value={money.format(finance.debt)} tone={finance.debt ? "red" : "green"} icon={<CircleDollarSign />} />
+          <Metric title="Чистая выручка" value={money.format(finance.net)} icon={<WalletCards />} />
         </div>
       </div>
       <div className="chip-scroll">
@@ -811,21 +836,21 @@ function FinancePage({ data, clinicId, refresh, notify }) {
         <InfoCard title="Динамика" icon={<BarChart3 />}>
           {chart.length ? <div className="chart-box"><ResponsiveContainer width="100%" height="100%"><AreaChart data={chart}>
             <defs>
-              <linearGradient id="income" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#27966f" stopOpacity={0.35}/><stop offset="95%" stopColor="#27966f" stopOpacity={0}/></linearGradient>
-              <linearGradient id="expense" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#d86b4d" stopOpacity={0.25}/><stop offset="95%" stopColor="#d86b4d" stopOpacity={0}/></linearGradient>
+              <linearGradient id="income" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#A88C45" stopOpacity={0.3}/><stop offset="95%" stopColor="#A88C45" stopOpacity={0}/></linearGradient>
+              <linearGradient id="expense" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#9A3B3B" stopOpacity={0.16}/><stop offset="95%" stopColor="#9A3B3B" stopOpacity={0}/></linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#dfe7eb" />
             <XAxis dataKey="date" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} width={52} />
-            <Tooltip formatter={(value) => money.format(value)} /><Legend />
-            <Area type="monotone" dataKey="Доход" stroke="#27966f" fill="url(#income)" strokeWidth={2.5} />
-            <Area type="monotone" dataKey="Расход" stroke="#d86b4d" fill="url(#expense)" strokeWidth={2.5} />
+            <Tooltip contentStyle={{ border: "1px solid #E6E1D6", borderRadius: 14, boxShadow: "0 12px 32px rgba(28,28,30,.08)" }} formatter={(value) => money.format(value)} /><Legend />
+            <Area type="monotone" dataKey="Доход" stroke="#A88C45" fill="url(#income)" strokeWidth={2.2} />
+            <Area type="monotone" dataKey="Расход" stroke="#9A3B3B" fill="url(#expense)" strokeWidth={2.2} />
           </AreaChart></ResponsiveContainer></div> : <p className="muted">Недостаточно данных для графика.</p>}
         </InfoCard>
         <InfoCard title="Расходы по категориям" icon={<BarChart3 />}>
           {categories.length ? <div className="chart-box"><ResponsiveContainer width="100%" height="100%"><BarChart data={categories} layout="vertical">
             <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#dfe7eb" />
             <XAxis type="number" tick={{ fontSize: 11 }} /><YAxis dataKey="name" type="category" width={88} tick={{ fontSize: 11 }} />
-            <Tooltip formatter={(value) => money.format(value)} /><Bar dataKey="value" fill="#157191" radius={[0, 7, 7, 0]} />
+            <Tooltip contentStyle={{ border: "1px solid #E6E1D6", borderRadius: 14, boxShadow: "0 12px 32px rgba(28,28,30,.08)" }} formatter={(value) => money.format(value)} /><Bar dataKey="value" fill="#A88C45" radius={[0, 7, 7, 0]} />
           </BarChart></ResponsiveContainer></div> : <p className="muted">Расходов за период нет.</p>}
         </InfoCard>
       </div>
@@ -1143,7 +1168,17 @@ function InfoRow({ label, value }) {
   return <div className="info-row"><span>{label}</span><strong>{String(value)}</strong></div>;
 }
 function StatusBadge({ status }) {
-  const tone = status === "Должник" ? "red" : status === "Завершён" ? "green" : status === "Контроль" ? "orange" : "blue";
+  const tone = status === "Должник"
+    ? "red"
+    : status === "Завершён"
+      ? "green"
+      : status === "Контроль"
+        ? "graphite"
+        : status === "Архив"
+          ? "gray"
+          : status === "На лечении"
+            ? "gold"
+            : "blue";
   return <span className={`status-badge ${tone}`}>{status}</span>;
 }
 function Empty({ icon, title, text, action }) {
