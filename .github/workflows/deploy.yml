@@ -1,4 +1,4 @@
-name: Публикация CURE Web
+name: Publish CURE Web
 
 on:
   push:
@@ -23,31 +23,37 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Скачать проект
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Установить pnpm
+      - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10
 
-      - name: Установить Node.js
+      - name: Install Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
 
-      - name: Установить зависимости
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Собрать приложение
+      - name: Build application
         run: pnpm build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
-      - name: Настроить GitHub Pages
+      - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Загрузить результат сборки
-      
+      - name: Upload website
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy website
+        id: deployment
+        uses: actions/deploy-pages@v4
