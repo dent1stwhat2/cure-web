@@ -35,6 +35,7 @@ const safeDate = (value) => value ? shortDate.format(new Date(value)) : "—";
 const sum = (items, selector) => items.reduce((total, item) => total + Number(selector(item) || 0), 0);
 const isIncome = (t) => t.type === "Доход" || t.type === "Коррекция";
 const isExpense = (t) => t.type === "Расход" || t.type === "Возврат";
+const isDebt = (t) => t.type === "Долг";
 
 export default function App() {
   const [session, setSession] = useState(cloudEnabled ? null : { user: { email: "demo@cure.app", id: "demo" } });
@@ -59,7 +60,7 @@ export default function App() {
     if (!cloudEnabled || !session) return;
     setMembership(undefined);
     supabase.from("clinic_members")
-      .select("clinic_id, role, clinics(id,name,invite_code)")
+      .select("clinic_id, role, full_name, job_title, clinics(id,name,invite_code)")
       .eq("user_id", session.user.id)
       .maybeSingle()
       .then(({ data, error }) => {
@@ -153,6 +154,9 @@ function AuthScreen({ onMessage }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [jobTitle, setJobTitle] = useState("Врач-стоматолог");
+  const [inviteCode, setInviteCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [resendBusy, setResendBusy] = useState(false);
   const [formError, setFormError] = useState("");
@@ -162,6 +166,8 @@ function AuthScreen({ onMessage }) {
     setMode(nextMode);
     setPassword("");
     setConfirmPassword("");
+    setFullName("");
+    setInviteCode("");
     setFormError("");
     setRegistrationComplete(false);
   };
@@ -178,8 +184,16 @@ function AuthScreen({ onMessage }) {
       setFormError("Пароль должен содержать минимум 8 символов.");
       return;
     }
-    if (mode === "register" && password !== confirmPassword) {
+    if (mode !== "login" && password !== confirmPassword) {
       setFormError("Пароли не совпадают. Проверьте подтверждение пароля.");
+      return;
+    }
+    if (mode === "join" && !inviteCode.trim()) {
+      setFormError("Введите код приглашения клиники.");
+      return;
+    }
+    if (mode !== "login" && !fullName.trim()) {
+      setFormError("Введите ФИО сотрудника.");
       return;
     }
     setBusy(true);
@@ -189,7 +203,12 @@ function AuthScreen({ onMessage }) {
           email: normalizedEmail,
           password,
           options: {
-            emailRedirectTo: `${window.location.origin}${import.meta.env.BASE_URL}`
+            emailRedirectTo: `${window.location.origin}${import.meta.env.BASE_URL}`,
+            data: {
+              full_name: fullName.trim(),
+              job_title: jobTitle,
+              invite_code: mode === "join" ? inviteCode.trim().toUpperCase() : null
+            }
           }
         });
     setBusy(false);
@@ -206,7 +225,7 @@ function AuthScreen({ onMessage }) {
       }
       return;
     }
-    if (mode === "register") {
+    if (mode !== "login") {
       if (Array.isArray(result.data.user?.identities) && result.data.user.identities.length === 0) {
         setFormError("Аккаунт с этой почтой уже существует. Перейдите во вкладку «Войти».");
         return;
@@ -259,6 +278,7 @@ function AuthScreen({ onMessage }) {
             Мы отправили письмо на <strong>{email.trim().toLowerCase()}</strong>.
             Откройте письмо от Supabase и нажмите ссылку подтверждения.
           </p>
+          {mode === "join" && <p className="muted">После подтверждения почты вы автоматически войдёте в клинику по коду <strong>{inviteCode.trim().toUpperCase()}</strong>.</p>}
           <div className="auth-help">
             <strong>Письма нет?</strong>
             <span>Проверьте папки «Спам», «Промоакции» и правильность адреса.</span>
@@ -291,19 +311,33 @@ function AuthScreen({ onMessage }) {
         <div className="segmented">
           <button className={mode === "login" ? "active" : ""} onClick={() => changeMode("login")}>Войти</button>
           <button className={mode === "register" ? "active" : ""} onClick={() => changeMode("register")}>Регистрация</button>
+          <button className={mode === "join" ? "active" : ""} onClick={() => changeMode("join")}>По коду</button>
         </div>
-        <h2>{mode === "login" ? "С возвращением" : "Создать аккаунт"}</h2>
+        <h2>{mode === "login" ? "С возвращением" : mode === "join" ? "Войти в клинику" : "Создать аккаунт"}</h2>
         <p className="muted">
-          {mode === "login" ? "Войдите в общую клинику CURE." : "После регистрации создайте клинику или присоединитесь по коду."}
+          {mode === "login" ? "Войдите в общую клинику CURE." : mode === "join" ? "Введите код клиники, ФИО, должность и данные для личного входа." : "Создайте аккаунт владельца, а затем новую клинику."}
         </p>
         <form onSubmit={submit} className="stack">
+          {mode === "join" && <Field label="Код клиники">
+              <input value={inviteCode} onChange={(e) => setInviteCode(e.target.value.toUpperCase())} placeholder="CURE-AB12CD" autoComplete="off" />
+            </Field>}
+          {mode !== "login" && <>
+            <Field label="ФИО сотрудника">
+              <input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Иванов Иван Иванович" autoComplete="name" />
+            </Field>
+            <Field label="Должность">
+              <select value={jobTitle} onChange={(e) => setJobTitle(e.target.value)}>
+                {["Врач-стоматолог", "Главный врач", "Медбрат / медсестра", "Ассистент", "Администратор", "Руководитель", "Бухгалтер", "Другое"].map((value) => <option key={value}>{value}</option>)}
+              </select>
+            </Field>
+          </>}
           <Field label="Email">
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" placeholder="doctor@clinic.ru" />
           </Field>
           <Field label="Пароль">
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder="Минимум 8 символов" />
           </Field>
-          {mode === "register" && (
+          {mode !== "login" && (
             <Field label="Подтверждение пароля">
               <input
                 type="password"
@@ -315,7 +349,7 @@ function AuthScreen({ onMessage }) {
             </Field>
           )}
           {formError && <div className="auth-error" role="alert">{formError}</div>}
-          <button className="primary wide" disabled={busy}>{busy ? "Подождите…" : mode === "login" ? "Войти в CURE" : "Зарегистрироваться"}</button>
+          <button className="primary wide" disabled={busy}>{busy ? "Подождите…" : mode === "login" ? "Войти в CURE" : mode === "join" ? "Зарегистрироваться и войти по коду" : "Зарегистрироваться"}</button>
         </form>
         <p className="privacy-note"><LockKeyhole size={15} /> Медицинские данные доступны только участникам вашей клиники.</p>
       </section>
@@ -327,6 +361,8 @@ function ClinicOnboarding({ session, onJoined, onMessage }) {
   const [tab, setTab] = useState("create");
   const [name, setName] = useState("Моя клиника");
   const [code, setCode] = useState("");
+  const [memberName, setMemberName] = useState(session.user.user_metadata?.full_name || "");
+  const [memberJobTitle, setMemberJobTitle] = useState(session.user.user_metadata?.job_title || "Врач-стоматолог");
   const [busy, setBusy] = useState(false);
 
   const submit = async (event) => {
@@ -334,12 +370,16 @@ function ClinicOnboarding({ session, onJoined, onMessage }) {
     setBusy(true);
     const rpc = tab === "create"
       ? await supabase.rpc("create_clinic", { clinic_name: name })
-      : await supabase.rpc("join_clinic_by_code", { code: code.trim().toUpperCase() });
+      : await supabase.rpc("join_clinic_by_code", {
+          code: code.trim().toUpperCase(),
+          member_name: memberName.trim(),
+          member_job_title: memberJobTitle
+        });
     setBusy(false);
     if (rpc.error) return onMessage(rpc.error.message);
     const clinicId = rpc.data;
     const { data } = await supabase.from("clinic_members")
-      .select("clinic_id, role, clinics(id,name,invite_code)")
+      .select("clinic_id, role, full_name, job_title, clinics(id,name,invite_code)")
       .eq("user_id", session.user.id).eq("clinic_id", clinicId).single();
     onJoined(data);
   };
@@ -358,7 +398,13 @@ function ClinicOnboarding({ session, onJoined, onMessage }) {
           {tab === "create" ? (
             <Field label="Название клиники"><input value={name} onChange={(e) => setName(e.target.value)} required /></Field>
           ) : (
-            <Field label="Код приглашения"><input value={code} onChange={(e) => setCode(e.target.value)} placeholder="CURE-AB12CD" required /></Field>
+            <>
+              <Field label="Код приглашения"><input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="CURE-AB12CD" required /></Field>
+              <Field label="ФИО"><input value={memberName} onChange={(e) => setMemberName(e.target.value)} required /></Field>
+              <Field label="Должность"><select value={memberJobTitle} onChange={(e) => setMemberJobTitle(e.target.value)}>
+                {["Врач-стоматолог", "Главный врач", "Медбрат / медсестра", "Ассистент", "Администратор", "Руководитель", "Бухгалтер", "Другое"].map((value) => <option key={value}>{value}</option>)}
+              </select></Field>
+            </>
           )}
           <button className="primary wide" disabled={busy}>{busy ? "Подождите…" : tab === "create" ? "Создать клинику" : "Присоединиться"}</button>
         </form>
@@ -639,7 +685,7 @@ function VisitsSection({ visits, onAdd, onEdit }) {
         const debt = Math.max(0, Number(visit.total_cost) - Number(visit.discount || 0) - Number(visit.paid_amount) + Number(visit.refund || 0));
         return (
           <button className="visit-card" key={visit.id} onClick={() => onEdit(visit)}>
-            <div className="visit-top"><div><h3>{visit.treatment_type}</h3><p>{safeDate(visit.date)} · {visit.teeth || "Область не указана"}</p></div><strong>{money.format(visit.total_cost || 0)}</strong></div>
+            <div className="visit-top"><div><h3>{visit.treatment_type}</h3><p>{safeDate(visit.date)} · {visit.visit_kind || "Визит"} · {visit.teeth || "Область не указана"}</p></div><strong>{money.format(visit.total_cost || 0)}</strong></div>
             <p>{visit.diagnosis || visit.procedure_description || "Описание не заполнено"}</p>
             <div className="finance-line"><span className="positive">Оплачено {money.format(visit.paid_amount || 0)}</span><span className={debt ? "negative" : "positive"}>Долг {money.format(debt)}</span></div>
           </button>
@@ -659,6 +705,7 @@ function PatientFinance({ patient, data, finance, onAdd }) {
         <Metric title="Расходы" value={money.format(finance.expenses)} tone="orange" icon={<ArrowUpRight />} />
         <Metric title="Чистая выручка" value={money.format(finance.net)} icon={<WalletCards />} />
         <Metric title="Задолженность" value={money.format(finance.debt)} tone="red" icon={<CircleDollarSign />} />
+        {finance.manualDebt > 0 && <Metric title="Добавлено вручную" value={money.format(finance.manualDebt)} tone="red" icon={<CircleDollarSign />} />}
       </div>
       <div className="section-heading"><div><h2>Операции пациента</h2></div><button className="primary" onClick={onAdd}><Plus />Добавить</button></div>
       <TransactionsList transactions={transactions} />
@@ -866,7 +913,7 @@ function PatientEditor({ patient, clinicId, onClose, onSaved }) {
 function VisitEditor({ patient, visit, clinicId, onClose, onSaved }) {
   const [form, setForm] = useState(visit ? structuredClone(visit) : {
     patient_id: patient.id, date: new Date().toISOString().slice(0, 16), teeth: "",
-    treatment_type: "Консультация", complaint: "", diagnosis: "", procedure_description: "",
+    visit_kind: "Первичный визит", treatment_type: "Консультация", complaint: "", diagnosis: "", procedure_description: "",
     materials: "", anesthesia: "", recommendations: "", doctor_notes: "",
     total_cost: 0, paid_amount: 0, discount: 0, refund: 0, next_visit_date: ""
   });
@@ -887,6 +934,7 @@ function VisitEditor({ patient, visit, clinicId, onClose, onSaved }) {
       <form onSubmit={submit}>
         <div className="form-grid">
           <Field label="Дата и время"><input type="datetime-local" value={(form.date || "").slice(0, 16)} onChange={(e) => set("date", e.target.value)} /></Field>
+          <Field label="Тип визита"><select value={form.visit_kind || "Первичный визит"} onChange={(e) => set("visit_kind", e.target.value)}>{["Первичный визит", "Повторный визит", "Контрольный визит", "Экстренный визит", "Онлайн-консультация", "Другое"].map((v) => <option key={v}>{v}</option>)}</select></Field>
           <Field label="Вид лечения"><select value={form.treatment_type} onChange={(e) => set("treatment_type", e.target.value)}>{["Консультация", "Профессиональная гигиена", "Лечение кариеса", "Эндодонтическое лечение", "Реставрация", "Удаление зуба", "Хирургический приём", "Пародонтологическое лечение", "Ортопедический этап", "Ортодонтический приём", "Имплантация", "Контрольный осмотр", "Другое"].map((v) => <option key={v}>{v}</option>)}</select></Field>
           <Field label="Зуб / область (FDI)"><input value={form.teeth || ""} onChange={(e) => set("teeth", e.target.value)} /></Field>
           <Field label="Диагноз"><input value={form.diagnosis || ""} onChange={(e) => set("diagnosis", e.target.value)} /></Field>
@@ -916,11 +964,14 @@ function TransactionEditor({ patients, visits, presetPatient, clinicId, onClose,
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
   const categories = form.type === "Расход"
     ? ["Материалы", "Лаборатория", "Аренда", "Зарплата", "Ассистент", "Оборудование", "Расходники", "Реклама", "Обучение", "Налоги", "Комиссия", "Другое"]
+    : form.type === "Долг"
+      ? ["Лечение", "Визит", "Лаборатория", "Ортопедическая конструкция", "Имплантация", "Другое"]
     : ["Консультация", "Терапия", "Хирургия", "Ортопедия", "Ортодонтия", "Гигиена", "Имплантация", "Пародонтология", "Другое"];
   const patientVisits = visits.filter((v) => v.patient_id === form.patient_id);
   const submit = async (event) => {
     event.preventDefault();
     if (Number(form.amount) <= 0) return alert("Введите сумму");
+    if (form.type === "Долг" && !form.patient_id) return alert("Для записи долга выберите пациента");
     setBusy(true);
     try { await saveTransaction(clinicId, { ...form, amount: Number(form.amount), patient_id: form.patient_id || null, visit_id: form.visit_id || null }); await onSaved(); }
     catch (error) { alert(error.message || "Не удалось сохранить запись"); }
@@ -930,13 +981,17 @@ function TransactionEditor({ patients, visits, presetPatient, clinicId, onClose,
     <Modal title="Финансовая запись" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
-          <Field label="Тип"><select value={form.type} onChange={(e) => { set("type", e.target.value); set("category", e.target.value === "Расход" ? "Материалы" : "Консультация"); }}>{["Доход", "Расход", "Возврат", "Скидка", "Коррекция"].map((v) => <option key={v}>{v}</option>)}</select></Field>
+          <Field label="Тип"><select value={form.type} onChange={(e) => {
+            const nextType = e.target.value;
+            set("type", nextType);
+            set("category", nextType === "Расход" ? "Материалы" : nextType === "Долг" ? "Лечение" : "Консультация");
+          }}>{["Доход", "Долг", "Расход", "Возврат", "Скидка", "Коррекция"].map((v) => <option key={v}>{v}</option>)}</select></Field>
           <Field label="Сумма"><input type="number" min="0" inputMode="decimal" value={form.amount} onChange={(e) => set("amount", e.target.value)} autoFocus /></Field>
           <Field label="Дата"><input type="datetime-local" value={form.date} onChange={(e) => set("date", e.target.value)} /></Field>
           <Field label="Категория"><select value={form.category} onChange={(e) => set("category", e.target.value)}>{categories.map((v) => <option key={v}>{v}</option>)}</select></Field>
-          <Field label="Способ оплаты"><select value={form.payment_method} onChange={(e) => set("payment_method", e.target.value)}>{["Наличные", "Карта", "Перевод", "Рассрочка", "Другое"].map((v) => <option key={v}>{v}</option>)}</select></Field>
+          {form.type !== "Долг" && <Field label="Способ оплаты"><select value={form.payment_method} onChange={(e) => set("payment_method", e.target.value)}>{["Наличные", "Карта", "Перевод", "Рассрочка", "Другое"].map((v) => <option key={v}>{v}</option>)}</select></Field>}
           <Field label="Пациент"><select value={form.patient_id} onChange={(e) => { set("patient_id", e.target.value); set("visit_id", ""); }}><option value="">Не выбран</option>{patients.map((p) => <option value={p.id} key={p.id}>{p.full_name}</option>)}</select></Field>
-          <Field label="Визит" full><select value={form.visit_id} onChange={(e) => set("visit_id", e.target.value)}><option value="">Не выбран</option>{patientVisits.map((v) => <option value={v.id} key={v.id}>{safeDate(v.date)} · {v.treatment_type}</option>)}</select></Field>
+          <Field label="Визит" full><select value={form.visit_id} onChange={(e) => set("visit_id", e.target.value)}><option value="">Без привязки к визиту</option>{patientVisits.map((v) => <option value={v.id} key={v.id}>{safeDate(v.date)} · {v.visit_kind || "Визит"} · {v.treatment_type}</option>)}</select></Field>
           <Field label="Комментарий" full><textarea value={form.comment} onChange={(e) => set("comment", e.target.value)} /></Field>
         </div>
         <ModalActions busy={busy} onCancel={onClose} />
@@ -964,7 +1019,7 @@ function PhotoUploader({ patient, visits, clinicId, onClose, onSaved }) {
       <form onSubmit={submit}>
         <div className="form-grid">
           <Field label="Категория"><select value={category} onChange={(e) => setCategory(e.target.value)}>{["До лечения", "Этап лечения", "После лечения", "Рентген / КЛКТ", "Документы", "Другое"].map((v) => <option key={v}>{v}</option>)}</select></Field>
-          <Field label="Привязать к визиту"><select value={visitId} onChange={(e) => setVisitId(e.target.value)}><option value="">Без привязки</option>{visits.map((v) => <option value={v.id} key={v.id}>{safeDate(v.date)} · {v.treatment_type}</option>)}</select></Field>
+          <Field label="Привязать к визиту"><select value={visitId} onChange={(e) => setVisitId(e.target.value)}><option value="">Без привязки</option>{visits.map((v) => <option value={v.id} key={v.id}>{safeDate(v.date)} · {v.visit_kind || "Визит"} · {v.treatment_type}</option>)}</select></Field>
           <label className="upload-zone">
             <Upload />
             <strong>Выбрать из галереи</strong>
@@ -993,7 +1048,7 @@ function SettingsSheet({ session, membership, clinic, close, notify }) {
   return (
     <Modal title="Настройки" onClose={close}>
       <div className="settings-list">
-        <div className="settings-identity"><div className="avatar large">{session.user.email?.[0].toUpperCase()}</div><div><strong>{session.user.email}</strong><span>{membership.role === "owner" ? "Владелец клиники" : "Сотрудник"}</span></div></div>
+        <div className="settings-identity"><div className="avatar large">{(membership.full_name || session.user.email)?.[0].toUpperCase()}</div><div><strong>{membership.full_name || session.user.email}</strong><span>{membership.job_title || (membership.role === "owner" ? "Владелец клиники" : "Сотрудник")}</span><span>{session.user.email}</span></div></div>
         <InfoCard title="Общая клиника" icon={<Users />}>
           <InfoRow label="Название" value={clinic.name} />
           <div className="invite-code"><div><span>Код приглашения</span><strong>{clinic.invite_code}</strong></div><button className="secondary" onClick={copy}>Копировать</button></div>
@@ -1013,12 +1068,13 @@ function TransactionsList({ transactions, patients = [], onDelete }) {
   if (!transactions.length) return <Empty icon={<WalletCards />} title="Финансовых записей пока нет" text="Добавьте доход, расход или возврат." />;
   return <div className="transactions-list">{transactions.map((t) => {
     const positive = isIncome(t);
+    const debt = isDebt(t);
     const patient = patients.find((p) => p.id === t.patient_id);
     return (
       <div className="transaction-row" key={t.id}>
-        <div className={`transaction-icon ${positive ? "green" : "red"}`}>{positive ? <ArrowDownLeft /> : <ArrowUpRight />}</div>
-        <div><strong>{t.category}</strong><span>{[patient?.full_name, safeDate(t.date)].filter(Boolean).join(" · ")}</span></div>
-        <b className={positive ? "positive" : "negative"}>{positive ? "+" : "−"}{money.format(t.amount)}</b>
+        <div className={`transaction-icon ${positive ? "green" : "red"}`}>{positive ? <ArrowDownLeft /> : debt ? <CircleDollarSign /> : <ArrowUpRight />}</div>
+        <div><strong>{debt ? `Долг · ${t.category}` : t.category}</strong><span>{[patient?.full_name, safeDate(t.date)].filter(Boolean).join(" · ")}</span></div>
+        <b className={positive ? "positive" : "negative"}>{positive ? "+" : debt ? "+" : "−"}{money.format(t.amount)}</b>
         {onDelete && <button className="icon-button mini" onClick={() => onDelete(t)}><Trash2 /></button>}
       </div>
     );
@@ -1033,8 +1089,9 @@ function patientFinancials(patientId, data) {
   const unlinkedIncome = sum(transactions.filter((t) => isIncome(t) && !t.visit_id), (t) => t.amount);
   const refunds = sum(visits, (v) => v.refund) + sum(transactions.filter((t) => t.type === "Возврат" && !t.visit_id), (t) => t.amount);
   const expenses = sum(transactions.filter((t) => t.type === "Расход"), (t) => t.amount);
+  const manualDebt = sum(transactions.filter(isDebt), (t) => t.amount);
   const paid = visitPaid + unlinkedIncome;
-  return { cost, paid, refunds, expenses, debt: Math.max(0, cost - paid + refunds), net: paid - expenses - refunds };
+  return { cost, paid, refunds, expenses, manualDebt, debt: Math.max(0, cost - paid + refunds + manualDebt), net: paid - expenses - refunds };
 }
 
 function filterTransactions(transactions, period) {
