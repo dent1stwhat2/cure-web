@@ -248,7 +248,8 @@ button:disabled { opacity: .55; cursor: wait; }
 .treatment-plan-item {
   width: 100%; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto 20px;
   gap: 11px; align-items: center; padding: 12px; text-align: left;
-  border: 1px solid var(--line); border-radius: 15px; background: white;
+  color: #1c2b32; border: 1px solid var(--line); border-radius: 15px; background: white;
+  -webkit-text-fill-color: currentColor; appearance: none; -webkit-appearance: none;
 }
 .treatment-plan-item:hover { border-color: #abc9d5; }
 .treatment-plan-number {
@@ -256,9 +257,9 @@ button:disabled { opacity: .55; cursor: wait; }
   border-radius: 50%; color: var(--blue); background: #e7f0f4; font-size: 12px; font-weight: 800;
 }
 .treatment-plan-content { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.treatment-plan-content strong { overflow: hidden; text-overflow: ellipsis; }
+.treatment-plan-content strong { color: inherit; overflow: hidden; text-overflow: ellipsis; }
 .treatment-plan-content small { color: var(--muted); }
-.treatment-plan-price { font-weight: 750; white-space: nowrap; }
+.treatment-plan-price { color: inherit; font-weight: 750; white-space: nowrap; }
 .treatment-plan-edit { width: 16px; color: var(--muted); }
 .treatment-plan-total {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -338,6 +339,15 @@ button:disabled { opacity: .55; cursor: wait; }
 .timeline-item time { display: block; margin-bottom: 5px; color: var(--muted); font-size: 11px; }
 .timeline-item strong { display: block; }
 .timeline-item p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+.documents-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; }
+.document-card { display: flex; flex-direction: column; gap: 14px; padding: 20px; border: 1px solid var(--line); border-radius: 20px; background: white; }
+.document-card > div { display: flex; align-items: center; gap: 11px; }
+.document-card > div > svg { width: 25px; height: 25px; color: var(--blue); }
+.document-card > div span { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.document-card > div small { color: var(--muted); }
+.document-card p { flex: 1; margin: 0; color: var(--muted); line-height: 1.5; }
+.document-notice { display: flex; align-items: flex-start; gap: 8px; padding: 13px 15px; color: var(--orange); border: 1px solid rgba(189,116,57,.2); border-radius: 15px; background: rgba(189,116,57,.07); font-size: 12px; }
+.document-notice svg { width: 17px; min-width: 17px; }
 .info-row { display: flex; justify-content: space-between; gap: 18px; padding: 10px 0; border-bottom: 1px solid #edf1f3; font-size: 13px; }
 .info-row:last-child { border: 0; }
 .info-row span { color: var(--muted); }
@@ -445,6 +455,7 @@ button:disabled { opacity: .55; cursor: wait; }
   .metric-card strong { font-size: 18px; }
   .charts-grid { grid-template-columns: 1fr; }
   .photo-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .documents-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 540px) {
@@ -480,6 +491,9 @@ button:disabled { opacity: .55; cursor: wait; }
   .modal-actions { margin: 18px -16px -16px; }
   .lightbox-panel { flex-wrap: wrap; }
   .treatment-plan-item { grid-template-columns: 30px minmax(0, 1fr) auto; }
+  .treatment-plan-item,
+  .treatment-plan-content strong,
+  .treatment-plan-price { color: var(--cure-text); -webkit-text-fill-color: var(--cure-text); }
   .treatment-plan-edit { display: none; }
   .treatment-plan-price { grid-column: 2 / -1; }
   .treatment-editor-actions { flex-wrap: wrap; }
@@ -1379,8 +1393,10 @@ select {
 }
 
 .treatment-plan-item {
+  color: var(--cure-text);
   border-color: var(--cure-border);
   background: var(--cure-surface);
+  -webkit-text-fill-color: var(--cure-text);
 }
 
 .treatment-plan-item:hover {
@@ -1391,6 +1407,7 @@ select {
 .treatment-plan-number {
   color: var(--cure-gold);
   background: var(--cure-surface-soft);
+  -webkit-text-fill-color: var(--cure-gold);
 }
 
 .treatment-plan-note,
@@ -1398,6 +1415,14 @@ select {
 .treatment-plan-total span,
 .treatment-plan-edit {
   color: var(--cure-text-muted);
+  -webkit-text-fill-color: var(--cure-text-muted);
+}
+
+.treatment-plan-content strong,
+.treatment-plan-price,
+.treatment-plan-total strong {
+  color: var(--cure-text);
+  -webkit-text-fill-color: var(--cure-text);
 }
 
 .treatment-plan-total {
@@ -1697,6 +1722,28 @@ select {
 
 .timeline::before {
   background: var(--cure-border);
+}
+
+.document-card {
+  color: var(--cure-text);
+  border-color: var(--cure-border);
+  background: var(--cure-surface);
+  box-shadow: 0 9px 24px var(--cure-shadow);
+}
+
+.document-card > div > svg {
+  color: var(--cure-gold);
+}
+
+.document-card > div small,
+.document-card p {
+  color: var(--cure-text-muted);
+}
+
+.document-notice {
+  color: #806344;
+  border-color: var(--cure-border);
+  background: var(--cure-surface-soft);
 }
 
 /* Responsive luxury layout */

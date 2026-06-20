@@ -5,7 +5,7 @@ import {
   Filter, Image as ImageIcon, LockKeyhole, LogOut, Menu, MoreHorizontal,
   Phone, Plus, RefreshCw, Search, Settings, ShieldCheck, Stethoscope,
   AlertTriangle, ClipboardList, History, LayoutDashboard, Sparkles,
-  Trash2, Upload, UserRound, Users, WalletCards, X
+  FileCheck2, Printer, Trash2, Upload, UserRound, Users, WalletCards, X
 } from "lucide-react";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer,
@@ -44,6 +44,9 @@ const sameDay = (left, right) => {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 };
 const timeLabel = (value) => new Date(value).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+const escapeHtml = (value = "") => String(value).replace(/[&<>"']/g, (character) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+})[character]);
 const treatmentTemplates = [
   { name: "Лечение кариеса", price: 0, notes: "Препарирование, медикаментозная обработка, восстановление анатомической формы." },
   { name: "Профессиональная гигиена", price: 0, notes: "Удаление зубных отложений, полировка, рекомендации по домашней гигиене." },
@@ -797,7 +800,7 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
         <button onClick={() => setTxEditor(true)}><WalletCards /><span>Оплата</span></button>
       </div>
       <div className="chip-scroll">
-        {["Обзор", "Зубная формула", "История", "Анамнез", "Лечение", "Финансы", "Фото", "Заметки"].map((item) => (
+        {["Обзор", "Зубная формула", "История", "Документы", "Анамнез", "Лечение", "Финансы", "Фото", "Заметки"].map((item) => (
           <button key={item} className={section === item ? "active" : ""} onClick={() => setSection(item)}>{item}</button>
         ))}
       </div>
@@ -817,6 +820,9 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
       )}
       {section === "История" && (
         <PatientTimeline patient={patient} data={data} />
+      )}
+      {section === "Документы" && (
+        <DocumentsSection patient={patient} clinic={data.clinic} visits={visits} />
       )}
       {section === "Лечение" && (
         <VisitsSection visits={visits} onAdd={() => setVisitEditor({})} onEdit={setVisitEditor} />
@@ -1121,6 +1127,98 @@ function PatientTimeline({ patient, data }) {
       ))}</div> : <Empty icon={<History />} title="История пока пуста" text="Визиты, фотографии, оплаты и планы лечения появятся здесь автоматически." />}
     </div>
   );
+}
+
+function DocumentsSection({ patient, clinic, visits }) {
+  const plan = treatmentItems(patient);
+  const latest = visits[0];
+  const print = (type) => printPatientDocument(type, patient, clinic, plan, latest);
+  return (
+    <div className="section-block">
+      <div className="section-heading">
+        <div><h2>Документы пациента</h2><p>Печать или сохранение через «Сохранить как PDF»</p></div>
+      </div>
+      <div className="documents-grid">
+        <article className="document-card">
+          <div><ClipboardList /><span><strong>План лечения</strong><small>{plan.length} этапов · {money.format(sum(plan, (item) => item.price))}</small></span></div>
+          <p>Процедуры, зубы, статусы, цены и итоговая стоимость.</p>
+          <button className="primary" onClick={() => print("plan")}><Printer />Печать / PDF</button>
+        </article>
+        <article className="document-card">
+          <div><FileCheck2 /><span><strong>Рекомендации</strong><small>Для выдачи пациенту</small></span></div>
+          <p>Текущие рекомендации из карточки и последнего визита.</p>
+          <button className="primary" onClick={() => print("recommendations")}><Printer />Печать / PDF</button>
+        </article>
+        <article className="document-card">
+          <div><ShieldCheck /><span><strong>Согласие пациента</strong><small>Шаблон для подписи</small></span></div>
+          <p>Информированное согласие с местами для даты и подписей.</p>
+          <button className="primary" onClick={() => print("consent")}><Printer />Печать / PDF</button>
+        </article>
+      </div>
+      <div className="document-notice"><AlertTriangle />Текст согласия является базовым шаблоном. Перед использованием проверьте его с юристом по требованиям вашей страны.</div>
+    </div>
+  );
+}
+
+function printPatientDocument(type, patient, clinic, plan, latestVisit) {
+  const popup = window.open("", "_blank", "width=900,height=1100");
+  if (!popup) return alert("Разрешите всплывающие окна, чтобы открыть документ");
+  const clinicName = escapeHtml(clinic?.name || "CURE CLINIC");
+  const patientName = escapeHtml(patient.full_name);
+  const birthDate = patient.birth_date ? safeDate(patient.birth_date) : "не указана";
+  const generated = new Date().toLocaleDateString("ru-RU");
+  const sharedHeader = `
+    <header><div class="brand">CURE <small>CLINIC</small></div><div>${clinicName}</div></header>
+    <div class="patient"><b>Пациент:</b> ${patientName}<br><b>Дата рождения:</b> ${birthDate}<br><b>Дата документа:</b> ${generated}</div>
+  `;
+  const planRows = plan.length ? plan.map((item, index) => `
+    <tr><td>${index + 1}</td><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.teeth || "—")}</td><td>${escapeHtml(item.status || "Запланировано")}</td><td>${money.format(item.price || 0)}</td></tr>
+  `).join("") : `<tr><td colspan="5">План лечения пока не заполнен.</td></tr>`;
+  const documents = {
+    plan: {
+      title: "План лечения",
+      body: `${sharedHeader}
+        <h1>План лечения</h1>
+        <p><b>Диагноз:</b> ${escapeHtml(patient.dental?.diagnosis || "не указан")}</p>
+        <table><thead><tr><th>№</th><th>Этап лечения</th><th>Зуб / область</th><th>Статус</th><th>Стоимость</th></tr></thead><tbody>${planRows}</tbody></table>
+        <div class="total"><span>Итоговая стоимость</span><b>${money.format(sum(plan.filter((item) => item.status !== "Отменено"), (item) => item.price))}</b></div>
+        <div class="signatures"><span>Врач ____________________</span><span>Пациент ____________________</span></div>`
+    },
+    recommendations: {
+      title: "Рекомендации",
+      body: `${sharedHeader}
+        <h1>Рекомендации пациенту</h1>
+        <div class="text">${escapeHtml(patient.dental?.recommendations || latestVisit?.recommendations || "Индивидуальные рекомендации пока не заполнены.").replaceAll("\n", "<br>")}</div>
+        ${latestVisit ? `<p><b>Последний визит:</b> ${safeDate(latestVisit.date)} · ${escapeHtml(latestVisit.treatment_type)}</p>` : ""}
+        <div class="signatures"><span>Врач ____________________</span><span>Пациент ____________________</span></div>`
+    },
+    consent: {
+      title: "Информированное согласие",
+      body: `${sharedHeader}
+        <h1>Информированное добровольное согласие</h1>
+        <div class="text consent">
+          Я, ${patientName}, подтверждаю, что получил(а) понятную информацию о состоянии здоровья, предполагаемых методах обследования и лечения, возможных альтернативах, рисках, осложнениях и ожидаемых результатах.
+          <br><br>Мне была предоставлена возможность задать вопросы и получить на них ответы. Я сообщил(а) врачу известные мне сведения об аллергиях, заболеваниях и принимаемых препаратах.
+          <br><br><b>Планируемое вмешательство / лечение:</b><br><br>____________________________________________________________________<br><br>____________________________________________________________________
+          <br><br>Я понимаю, что результат медицинского вмешательства не может быть гарантирован, и добровольно соглашаюсь на указанное лечение.
+        </div>
+        <div class="signatures"><span>Пациент ____________________</span><span>Врач ____________________</span><span>Дата ____________________</span></div>`
+    }
+  };
+  const document = documents[type];
+  popup.document.write(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${document.title} — ${patientName}</title>
+    <style>
+      @page{size:A4;margin:18mm}*{box-sizing:border-box}body{margin:0;color:#1c1c1e;font:14px/1.55 Arial,sans-serif}
+      header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:18px;border-bottom:1px solid #d9d4c8;color:#6e6e73}
+      .brand{color:#a88c45;font:28px Georgia,serif;letter-spacing:.12em}.brand small{display:block;text-align:center;font:7px Arial,sans-serif;letter-spacing:.35em}
+      .patient{margin:24px 0;padding:15px;border:1px solid #e6e1d6;border-radius:10px;background:#f8f7f3}
+      h1{margin:28px 0 20px;font:32px Georgia,serif}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{padding:10px;border-bottom:1px solid #e6e1d6;text-align:left}th{color:#6e6e73;font-size:11px;text-transform:uppercase}
+      td:last-child,th:last-child{text-align:right}.total{display:flex;justify-content:space-between;padding:18px 10px;border-top:2px solid #a88c45;font-size:17px}
+      .text{min-height:260px;padding:20px;border:1px solid #e6e1d6;border-radius:10px;white-space:normal}.consent{min-height:420px}
+      .signatures{display:flex;flex-wrap:wrap;justify-content:space-between;gap:28px;margin-top:70px}.signatures span{min-width:210px}
+      @media print{button{display:none}}
+    </style></head><body>${document.body}<script>setTimeout(()=>window.print(),250)<\/script></body></html>`);
+  popup.document.close();
 }
 
 function Anamnesis({ patient }) {
