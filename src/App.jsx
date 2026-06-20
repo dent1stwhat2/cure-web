@@ -687,7 +687,7 @@ function PatientsPage({ data, clinicId, refresh, openPatient, notify }) {
       ) : (
         <Empty icon={<Users />} title="Пациентов пока нет" text="Добавьте первого пациента — карточка сразу появится на всех устройствах клиники." action={() => setEditor(true)} />
       )}
-      {editor && <PatientEditor clinicId={clinicId} onClose={() => setEditor(false)} onSaved={async () => { await refresh(); setEditor(false); notify("Пациент сохранён"); }} />}
+      {editor && <PatientEditor clinicId={clinicId} onClose={() => setEditor(false)} onSaved={async (message) => { await refresh(); setEditor(false); notify(message || "Пациент сохранён"); }} />}
     </section>
   );
 }
@@ -850,7 +850,7 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
         <NotesSection patient={patient} clinicId={clinicId} refresh={refresh} notify={notify} />
       )}
 
-      {editPatient && <PatientEditor patient={patient} clinicId={clinicId} onClose={() => setEditPatient(false)} onSaved={async () => { await refresh(); setEditPatient(false); notify("Карточка обновлена"); }} />}
+      {editPatient && <PatientEditor patient={patient} clinicId={clinicId} onClose={() => setEditPatient(false)} onSaved={async (message) => { await refresh(); setEditPatient(false); notify(message || "Карточка обновлена"); }} />}
       {visitEditor && <VisitEditor patient={patient} visit={visitEditor.id ? visitEditor : null} clinicId={clinicId} onClose={() => setVisitEditor(null)} onSaved={async () => { await refresh(); setVisitEditor(null); notify("Визит сохранён"); }} />}
       {photoEditor && <PhotoUploader patient={patient} visits={visits} clinicId={clinicId} onClose={() => setPhotoEditor(false)} onSaved={async () => { await refresh(); setPhotoEditor(false); notify("Фотографии добавлены"); }} />}
       {txEditor && <TransactionEditor patients={data.patients} visits={data.visits} presetPatient={patient} clinicId={clinicId} onClose={() => setTxEditor(false)} onSaved={async () => { await refresh(); setTxEditor(false); notify("Финансовая запись сохранена"); }} />}
@@ -1516,6 +1516,8 @@ function PatientEditor({ patient, clinicId, onClose, onSaved }) {
     address: "", profession: "", source: "Рекомендации", first_visit_date: todayISO(),
     status: "Новый", general_note: "", anamnesis: {}, dental: {}
   });
+  const [nextAppointment, setNextAppointment] = useState("");
+  const [appointmentType, setAppointmentType] = useState("Консультация");
   const [tab, setTab] = useState("Анкета");
   const [busy, setBusy] = useState(false);
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
@@ -1524,8 +1526,33 @@ function PatientEditor({ patient, clinicId, onClose, onSaved }) {
     event.preventDefault();
     if (!form.full_name.trim()) return alert("Введите ФИО пациента");
     if (form.birth_date && new Date(form.birth_date) > new Date()) return alert("Дата рождения не может быть в будущем");
+    if (nextAppointment && new Date(nextAppointment) < new Date()) return alert("Следующая запись не может быть в прошлом");
     setBusy(true);
-    try { await savePatient(clinicId, form); await onSaved(); }
+    try {
+      const savedPatient = await savePatient(clinicId, form);
+      if (!patient && nextAppointment) {
+        await saveVisit(clinicId, {
+          patient_id: savedPatient.id,
+          date: nextAppointment,
+          teeth: "",
+          visit_kind: "Первичный визит",
+          treatment_type: appointmentType,
+          complaint: "",
+          diagnosis: "",
+          procedure_description: "",
+          materials: "",
+          anesthesia: "",
+          recommendations: "",
+          doctor_notes: "",
+          total_cost: 0,
+          paid_amount: 0,
+          discount: 0,
+          refund: 0,
+          next_visit_date: ""
+        });
+      }
+      await onSaved(patient ? "Карточка обновлена" : nextAppointment ? "Пациент добавлен и записан на приём" : "Пациент добавлен без записи");
+    }
     catch (error) { alert(error.message || "Не удалось сохранить пациента"); }
     finally { setBusy(false); }
   };
@@ -1546,6 +1573,16 @@ function PatientEditor({ patient, clinicId, onClose, onSaved }) {
           <Field label="Адрес" full><input value={form.address || ""} onChange={(e) => set("address", e.target.value)} /></Field>
           <Field label="Источник"><select value={form.source} onChange={(e) => set("source", e.target.value)}>{["Instagram", "Рекомендации", "Сайт", "Клиника", "Другое"].map((v) => <option key={v}>{v}</option>)}</select></Field>
           <Field label="Статус"><select value={form.status} onChange={(e) => set("status", e.target.value)}>{["Новый", "На лечении", "Завершён", "Контроль", "Должник", "Архив"].map((v) => <option key={v}>{v}</option>)}</select></Field>
+          {!patient && (
+            <div className="optional-appointment full">
+              <div><CalendarDays /><span><strong>Следующая запись</strong><small>Необязательно — пациента можно сохранить без даты приёма</small></span></div>
+              <div className="form-grid">
+                <Field label="Дата и время (необязательно)"><input type="datetime-local" value={nextAppointment} onChange={(event) => setNextAppointment(event.target.value)} /></Field>
+                <Field label="Цель визита"><select value={appointmentType} disabled={!nextAppointment} onChange={(event) => setAppointmentType(event.target.value)}>{["Консультация", "Профессиональная гигиена", "Лечение кариеса", "Эндодонтическое лечение", "Реставрация", "Удаление зуба", "Хирургический приём", "Пародонтологическое лечение", "Ортопедический этап", "Ортодонтический приём", "Имплантация", "Контрольный осмотр", "Другое"].map((value) => <option key={value}>{value}</option>)}</select></Field>
+              </div>
+              {nextAppointment && <button type="button" className="clear-appointment" onClick={() => setNextAppointment("")}><X />Убрать запись и сохранить только пациента</button>}
+            </div>
+          )}
           <Field label="Заметка" full><textarea value={form.general_note || ""} onChange={(e) => set("general_note", e.target.value)} /></Field>
         </div>}
         {tab === "Анамнез" && <div className="form-grid">
