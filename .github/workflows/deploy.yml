@@ -1,0 +1,53 @@
+name: Публикация CURE Web
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Скачать проект
+        uses: actions/checkout@v4
+
+      - name: Установить pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Установить Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Установить зависимости
+        run: pnpm install --frozen-lockfile
+
+      - name: Собрать приложение
+        run: pnpm build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      - name: Настроить GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Загрузить результат сборки
+      
