@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity, ArrowDownLeft, ArrowUpRight, BarChart3, CalendarDays, Camera,
-  Check, ChevronLeft, ChevronRight, CircleDollarSign, Clock, Cloud, Download, Edit3, FileText,
-  Filter, Image as ImageIcon, LockKeyhole, LogOut, Menu, MoreHorizontal,
-  Phone, Plus, RefreshCw, Search, Settings, ShieldCheck, Stethoscope,
+  Check, ChevronLeft, ChevronRight, CircleDollarSign, Clock, Cloud, Copy, Download, Edit3, FileText,
+  Filter, Image as ImageIcon, LockKeyhole, LogOut, Menu, MessageCircle, MoreHorizontal,
+  Phone, Plus, RefreshCw, Search, Send, Settings, ShieldCheck, Stethoscope,
   AlertTriangle, ClipboardList, History, LayoutDashboard, Sparkles,
-  FileCheck2, Printer, Trash2, Upload, UserRound, Users, WalletCards, X
+  FileCheck2, Printer, Trash2, Upload, UserPlus, UserRound, Users, WalletCards, X
 } from "lucide-react";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer,
@@ -47,6 +47,17 @@ const timeLabel = (value) => new Date(value).toLocaleTimeString("ru-RU", { hour:
 const escapeHtml = (value = "") => String(value).replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
 })[character]);
+const communicationProfile = (patient) => patient?.dental?.communication || {};
+const normalizeTelegramUsername = (value = "") => value.trim().replace(/^@+/, "").replace(/\s+/g, "");
+const telegramLink = (username = "") => {
+  const clean = normalizeTelegramUsername(username);
+  return clean ? `https://t.me/${clean}` : "";
+};
+const whatsappLink = (phone = "") => {
+  let digits = String(phone).replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("8")) digits = `7${digits.slice(1)}`;
+  return digits.length >= 10 ? `https://wa.me/${digits}` : "";
+};
 const treatmentTemplates = [
   { name: "Лечение кариеса", price: 0, notes: "Препарирование, медикаментозная обработка, восстановление анатомической формы." },
   { name: "Профессиональная гигиена", price: 0, notes: "Удаление зубных отложений, полировка, рекомендации по домашней гигиене." },
@@ -650,7 +661,14 @@ function PatientsPage({ data, clinicId, refresh, openPatient, notify }) {
       .filter((patient) => {
         const visits = data.visits.filter((v) => v.patient_id === patient.id);
         const planItems = treatmentItems(patient).flatMap((item) => [item.name, item.teeth, item.notes, item.status]);
-        const haystack = [patient.full_name, patient.phone, patient.dental?.diagnosis, patient.dental?.treatment_plan, ...planItems, ...visits.map((v) => v.treatment_type)].join(" ").toLowerCase();
+        const communication = communicationProfile(patient);
+        const representative = communication.representative || {};
+        const haystack = [
+          patient.full_name, patient.phone, patient.second_phone, patient.dental?.diagnosis, patient.dental?.treatment_plan,
+          communication.telegram_username, communication.preferred_channel, communication.contact_note, communication.follow_up_reason,
+          representative.name, representative.phone, representative.telegram,
+          ...planItems, ...visits.map((v) => v.treatment_type)
+        ].join(" ").toLowerCase();
         return (!q || haystack.includes(q)) && (status === "Все" || patient.status === status);
       })
       .sort((a, b) => {
@@ -697,6 +715,8 @@ function PatientCard({ patient, data, onClick }) {
   const latest = visits.sort((a, b) => new Date(b.date) - new Date(a.date))[0];
   const finance = patientFinancials(patient.id, data);
   const photo = data.photos.find((p) => p.patient_id === patient.id);
+  const communication = communicationProfile(patient);
+  const telegram = normalizeTelegramUsername(communication.telegram_username);
   return (
     <button className="patient-card" onClick={onClick}>
       <div className="patient-photo">
@@ -707,6 +727,12 @@ function PatientCard({ patient, data, onClick }) {
           <div><h3>{patient.full_name}</h3><p>{age(patient.birth_date)} лет · {patient.phone || "Телефон не указан"}</p></div>
           <StatusBadge status={finance.debt > 0 ? "Должник" : patient.status} />
         </div>
+        {(telegram || communication.follow_up_needed) && (
+          <div className="patient-contact-tags">
+            {telegram && <span><Send />@{telegram}</span>}
+            {communication.follow_up_needed && <span className="attention"><MessageCircle />Нужно связаться</span>}
+          </div>
+        )}
         <div className="patient-meta">
           <span><CalendarDays />{latest ? safeDate(latest.date) : "Визитов нет"}</span>
           <strong>{money.format(finance.cost)}</strong>
@@ -735,6 +761,9 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
   const photos = data.photos.filter((p) => p.patient_id === patient.id);
   const documents = (data.documents || []).filter((document) => document.patient_id === patient.id);
   const warnings = patientWarnings(patient);
+  const communication = communicationProfile(patient);
+  const telegramUrl = telegramLink(communication.telegram_username);
+  const whatsappUrl = whatsappLink(patient.phone);
 
   const remove = async () => {
     if (!confirm("Удалить пациента, все визиты, финансы и фотографии безвозвратно?")) return;
@@ -758,12 +787,23 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
     }
   };
 
+  const copyText = async (value, message) => {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      notify(message);
+    } catch {
+      notify("Не удалось скопировать");
+    }
+  };
+
   return (
     <section>
       <div className="detail-nav">
         <button className="back-button" onClick={back}><ChevronLeft />Пациенты</button>
         <div className="detail-actions">
           {patient.phone && <a className="icon-button" href={`tel:${patient.phone}`}><Phone /></a>}
+          {telegramUrl && <a className="icon-button" href={telegramUrl} target="_blank" rel="noreferrer"><Send /></a>}
           <button className="icon-button" onClick={() => setEditPatient(true)}><Edit3 /></button>
           <button className="icon-button danger-ghost" onClick={remove}><Trash2 /></button>
         </div>
@@ -778,6 +818,13 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
           <p className="eyebrow">КАРТОЧКА ПАЦИЕНТА</p>
           <h1>{patient.full_name}</h1>
           <p>{age(patient.birth_date)} лет · {patient.phone || "Телефон не указан"}</p>
+          {(communication.important_note || communication.follow_up_needed || communication.preferred_channel) && (
+            <div className="patient-insights">
+              {communication.important_note && <span className="insight-pill important"><AlertTriangle />{communication.important_note}</span>}
+              {communication.follow_up_needed && <span className="insight-pill"><MessageCircle />Нужно связаться{communication.next_contact_date ? ` · ${safeDate(communication.next_contact_date)}` : ""}</span>}
+              {communication.preferred_channel && <span className="insight-pill muted-pill">{communication.preferred_channel}</span>}
+            </div>
+          )}
           <div className="patient-status-control">
             <StatusBadge status={finance.debt > 0 ? "Должник" : patient.status} />
             <label>
@@ -800,9 +847,11 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
         <button onClick={() => setTreatmentEditor({})}><ClipboardList /><span>В план</span></button>
         <button onClick={() => setPhotoEditor(true)}><Camera /><span>Фото</span></button>
         <button onClick={() => setTxEditor(true)}><WalletCards /><span>Оплата</span></button>
+        {telegramUrl && <a href={telegramUrl} target="_blank" rel="noreferrer"><Send /><span>Telegram</span></a>}
+        {whatsappUrl && <a href={whatsappUrl} target="_blank" rel="noreferrer"><MessageCircle /><span>WhatsApp</span></a>}
       </div>
       <div className="chip-scroll">
-        {["Обзор", "Зубная формула", "История", "Рекомендации", "Документы", "Анамнез", "Лечение", "Финансы", "Фото", "Заметки"].map((item) => (
+        {["Обзор", "Связь", "Зубная формула", "История", "Рекомендации", "Документы", "Анамнез", "Лечение", "Финансы", "Фото", "Заметки"].map((item) => (
           <button key={item} className={section === item ? "active" : ""} onClick={() => setSection(item)}>{item}</button>
         ))}
       </div>
@@ -814,6 +863,16 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
           finance={finance}
           onAddTreatment={() => setTreatmentEditor({})}
           onEditTreatment={setTreatmentEditor}
+        />
+      )}
+      {section === "Связь" && (
+        <CommunicationSection
+          patient={patient}
+          clinicId={clinicId}
+          refresh={refresh}
+          notify={notify}
+          onEdit={() => setEditPatient(true)}
+          onCopy={copyText}
         />
       )}
       {section === "Анамнез" && <Anamnesis patient={patient} />}
@@ -893,13 +952,22 @@ function Overview({ patient, visits, finance, onAddTreatment, onEditTreatment })
   const next = visits.filter((v) => v.next_visit_date && new Date(v.next_visit_date) >= new Date()).sort((a, b) => new Date(a.next_visit_date) - new Date(b.next_visit_date))[0];
   const plan = treatmentItems(patient);
   const planTotal = sum(plan.filter((item) => item.status !== "Отменено"), (item) => item.price);
+  const communication = communicationProfile(patient);
+  const telegram = normalizeTelegramUsername(communication.telegram_username);
   return (
     <div className="detail-grid">
       <InfoCard title="Основные данные" icon={<UserRound />}>
         <InfoRow label="Телефон" value={patient.phone || "—"} />
+        <InfoRow label="Telegram" value={telegram ? `@${telegram}` : "—"} />
         <InfoRow label="Источник" value={patient.source || "—"} />
         <InfoRow label="Последний визит" value={latest ? safeDate(latest.date) : "—"} />
         <InfoRow label="Следующий визит" value={next ? safeDate(next.next_visit_date) : "Не назначен"} />
+      </InfoCard>
+      <InfoCard title="Связь" icon={<MessageCircle />}>
+        <InfoRow label="Предпочтительно" value={communication.preferred_channel || "—"} />
+        <InfoRow label="Комментарий" value={communication.contact_note || "—"} />
+        <InfoRow label="Нужно связаться" value={communication.follow_up_needed ? (communication.follow_up_reason || "Да") : "Нет"} />
+        <InfoRow label="Следующий контакт" value={communication.next_contact_date ? safeDate(communication.next_contact_date) : "—"} />
       </InfoCard>
       <article className="info-card treatment-plan-card">
         <header>
@@ -1319,6 +1387,166 @@ function printPatientDocument(type, patient, clinic, plan, latestVisit) {
   popup.document.close();
 }
 
+function CommunicationSection({ patient, clinicId, refresh, notify, onEdit, onCopy }) {
+  const communication = communicationProfile(patient);
+  const telegram = normalizeTelegramUsername(communication.telegram_username);
+  const representative = communication.representative || {};
+  const logs = Array.isArray(communication.logs) ? communication.logs : [];
+  const [entry, setEntry] = useState("");
+  const [busy, setBusy] = useState(false);
+  const telegramUrl = telegramLink(telegram);
+  const whatsappUrl = whatsappLink(patient.phone);
+  const representativeTelegramUrl = telegramLink(representative.telegram);
+  const representativeWhatsappUrl = whatsappLink(representative.phone);
+
+  const saveCommunication = async (nextCommunication, message) => {
+    setBusy(true);
+    try {
+      await savePatient(clinicId, {
+        ...patient,
+        dental: {
+          ...(patient.dental || {}),
+          communication: nextCommunication
+        }
+      });
+      await refresh();
+      notify(message);
+    } catch (error) {
+      notify(error.message || "Не удалось сохранить связь");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addLog = async (event) => {
+    event.preventDefault();
+    const text = entry.trim();
+    if (!text) return;
+    await saveCommunication({
+      ...communication,
+      logs: [
+        { id: uuid(), date: new Date().toISOString(), text },
+        ...logs
+      ].slice(0, 40)
+    }, "Запись связи добавлена");
+    setEntry("");
+  };
+
+  const resolveFollowUp = async () => {
+    await saveCommunication({
+      ...communication,
+      follow_up_needed: false,
+      follow_up_reason: "",
+      next_contact_date: ""
+    }, "Задача связи закрыта");
+  };
+
+  return (
+    <div className="section-block communication-section">
+      <div className="section-heading">
+        <div>
+          <h2>Связь с пациентом</h2>
+          <p>Контакты, Telegram, представитель и короткий журнал коммуникации.</p>
+        </div>
+        <button className="secondary" onClick={onEdit}><Edit3 />Редактировать</button>
+      </div>
+
+      <div className="communication-grid">
+        <article className="info-card communication-card">
+          <header><Send /><h3>Быстрая связь</h3></header>
+          <div className="contact-stack">
+            <div className="contact-line">
+              <span>Телефон</span>
+              <strong>{patient.phone || "Не указан"}</strong>
+            </div>
+            <div className="contact-line">
+              <span>Telegram</span>
+              <strong>{telegram ? `@${telegram}` : "Не указан"}</strong>
+            </div>
+            <div className="contact-actions">
+              {patient.phone && <a className="secondary" href={`tel:${patient.phone}`}><Phone />Позвонить</a>}
+              {telegramUrl && <a className="primary" href={telegramUrl} target="_blank" rel="noreferrer"><Send />Telegram</a>}
+              {whatsappUrl && <a className="secondary" href={whatsappUrl} target="_blank" rel="noreferrer"><MessageCircle />WhatsApp</a>}
+              {telegram && <button className="secondary" onClick={() => onCopy(`@${telegram}`, "Telegram скопирован")}><Copy />Скопировать</button>}
+            </div>
+          </div>
+        </article>
+
+        <article className="info-card communication-card">
+          <header><UserPlus /><h3>Правила связи</h3></header>
+          <div>
+            <InfoRow label="Предпочтительный канал" value={communication.preferred_channel || "—"} />
+            <InfoRow label="Комментарий" value={communication.contact_note || "—"} />
+            <InfoRow label="Сообщения разрешены" value={communication.messaging_allowed ? "Да" : "Не указано"} />
+            <InfoRow label="Следующий контакт" value={communication.next_contact_date ? safeDate(communication.next_contact_date) : "—"} />
+          </div>
+          {communication.important_note && (
+            <div className="communication-note important-note">
+              <AlertTriangle />
+              <span>{communication.important_note}</span>
+            </div>
+          )}
+        </article>
+
+        <article className="info-card communication-card">
+          <header><UserRound /><h3>Представитель</h3></header>
+          <div>
+            <InfoRow label="ФИО" value={representative.name || "—"} />
+            <InfoRow label="Кем приходится" value={representative.relation || "—"} />
+            <InfoRow label="Телефон" value={representative.phone || "—"} />
+            <InfoRow label="Telegram" value={representative.telegram ? `@${normalizeTelegramUsername(representative.telegram)}` : "—"} />
+          </div>
+          {(representativeTelegramUrl || representativeWhatsappUrl) && (
+            <div className="contact-actions compact-actions">
+              {representativeTelegramUrl && <a className="secondary" href={representativeTelegramUrl} target="_blank" rel="noreferrer"><Send />Telegram</a>}
+              {representativeWhatsappUrl && <a className="secondary" href={representativeWhatsappUrl} target="_blank" rel="noreferrer"><MessageCircle />WhatsApp</a>}
+            </div>
+          )}
+        </article>
+
+        <article className="info-card communication-card">
+          <header><MessageCircle /><h3>Задача связи</h3></header>
+          {communication.follow_up_needed ? (
+            <div className="follow-up-box">
+              <strong>{communication.follow_up_reason || "Нужно связаться с пациентом"}</strong>
+              <span>{communication.next_contact_date ? `До ${safeDate(communication.next_contact_date)}` : "Дата не указана"}</span>
+              <button className="primary" disabled={busy} onClick={resolveFollowUp}><Check />Закрыть задачу</button>
+            </div>
+          ) : (
+            <div className="communication-empty">
+              <Check />
+              <span>Активной задачи связи нет</span>
+            </div>
+          )}
+        </article>
+      </div>
+
+      <article className="info-card communication-log-card">
+        <header><History /><h3>Журнал коммуникации</h3></header>
+        <form className="communication-log-form" onSubmit={addLog}>
+          <textarea value={entry} onChange={(event) => setEntry(event.target.value)} placeholder="Например: написал в Telegram, пациент подтвердил визит на пятницу." />
+          <button className="primary" disabled={busy || !entry.trim()}><Plus />Добавить запись</button>
+        </form>
+        {logs.length ? (
+          <div className="communication-log">
+            {logs.map((item) => (
+              <div className="communication-log-item" key={item.id}>
+                <time>{safeDate(item.date)} · {timeLabel(item.date)}</time>
+                <p>{item.text}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="communication-empty">
+            <History />
+            <span>Записей пока нет. Здесь можно фиксировать звонки, Telegram и договорённости.</span>
+          </div>
+        )}
+      </article>
+    </div>
+  );
+}
+
 function Anamnesis({ patient }) {
   const a = patient.anamnesis || {};
   const risks = [
@@ -1558,10 +1786,32 @@ function PatientEditor({ patient, clinicId, onClose, onSaved }) {
   };
   const a = form.anamnesis || {};
   const d = form.dental || {};
+  const c = d.communication || {};
+  const representative = c.representative || {};
+  const setCommunication = (key, value) => setForm((f) => ({
+    ...f,
+    dental: {
+      ...(f.dental || {}),
+      communication: { ...((f.dental || {}).communication || {}), [key]: value }
+    }
+  }));
+  const setRepresentative = (key, value) => setForm((f) => {
+    const communication = ((f.dental || {}).communication || {});
+    return {
+      ...f,
+      dental: {
+        ...(f.dental || {}),
+        communication: {
+          ...communication,
+          representative: { ...(communication.representative || {}), [key]: value }
+        }
+      }
+    };
+  });
   return (
     <Modal title={patient ? "Редактирование пациента" : "Новый пациент"} onClose={onClose} large>
       <form onSubmit={submit}>
-        <div className="form-tabs">{["Анкета", "Анамнез", "Стоматология"].map((item) => <button type="button" key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}</div>
+        <div className="form-tabs">{["Анкета", "Связь", "Анамнез", "Стоматология"].map((item) => <button type="button" key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}</div>
         {tab === "Анкета" && <div className="form-grid">
           <Field label="ФИО *" full><input value={form.full_name} onChange={(e) => set("full_name", e.target.value)} autoFocus /></Field>
           <Field label="Дата рождения"><input type="date" value={form.birth_date || ""} onChange={(e) => set("birth_date", e.target.value)} /></Field>
@@ -1584,6 +1834,27 @@ function PatientEditor({ patient, clinicId, onClose, onSaved }) {
             </div>
           )}
           <Field label="Заметка" full><textarea value={form.general_note || ""} onChange={(e) => set("general_note", e.target.value)} /></Field>
+        </div>}
+        {tab === "Связь" && <div className="form-grid">
+          <Field label="Telegram username"><input value={c.telegram_username || ""} onChange={(e) => setCommunication("telegram_username", normalizeTelegramUsername(e.target.value))} placeholder="@patient_name" /></Field>
+          <Field label="Предпочтительный способ связи">
+            <select value={c.preferred_channel || ""} onChange={(e) => setCommunication("preferred_channel", e.target.value)}>
+              {["", "Звонок", "Telegram", "WhatsApp", "SMS", "Через представителя", "Не беспокоить"].map((value) => <option key={value} value={value}>{value || "Не указано"}</option>)}
+            </select>
+          </Field>
+          <Field label="Комментарий по связи" full><textarea value={c.contact_note || ""} onChange={(e) => setCommunication("contact_note", e.target.value)} placeholder="Например: писать после 18:00, не звонить утром." /></Field>
+          <Field label="Важное для врача" full><textarea value={c.important_note || ""} onChange={(e) => setCommunication("important_note", e.target.value)} placeholder="Например: тревожный пациент, связь только через Telegram." /></Field>
+          <div className="toggle-grid full">
+            <label className="toggle-row"><span>Разрешены сообщения пациенту</span><input type="checkbox" checked={Boolean(c.messaging_allowed)} onChange={(e) => setCommunication("messaging_allowed", e.target.checked)} /></label>
+            <label className="toggle-row"><span>Нужно связаться</span><input type="checkbox" checked={Boolean(c.follow_up_needed)} onChange={(e) => setCommunication("follow_up_needed", e.target.checked)} /></label>
+          </div>
+          <Field label="Причина связи"><input value={c.follow_up_reason || ""} onChange={(e) => setCommunication("follow_up_reason", e.target.value)} placeholder="Например: подтвердить визит" /></Field>
+          <Field label="Следующий контакт"><input type="date" value={c.next_contact_date || ""} onChange={(e) => setCommunication("next_contact_date", e.target.value)} /></Field>
+          <div className="form-divider full">Представитель пациента</div>
+          <Field label="ФИО представителя"><input value={representative.name || ""} onChange={(e) => setRepresentative("name", e.target.value)} /></Field>
+          <Field label="Кем приходится"><input value={representative.relation || ""} onChange={(e) => setRepresentative("relation", e.target.value)} placeholder="Мама, супруг, дочь" /></Field>
+          <Field label="Телефон представителя"><input type="tel" value={representative.phone || ""} onChange={(e) => setRepresentative("phone", e.target.value)} /></Field>
+          <Field label="Telegram представителя"><input value={representative.telegram || ""} onChange={(e) => setRepresentative("telegram", normalizeTelegramUsername(e.target.value))} placeholder="@relative" /></Field>
         </div>}
         {tab === "Анамнез" && <div className="form-grid">
           <Field label="Аллергии" full><textarea value={a.allergies || ""} onChange={(e) => setNested("anamnesis", "allergies", e.target.value)} /></Field>
