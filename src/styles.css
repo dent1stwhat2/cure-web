@@ -330,6 +330,40 @@ button:disabled { opacity: .55; cursor: wait; }
 .tooth-Удалён { color: #888 !important; background: #EEE !important; text-decoration: line-through; }
 .tooth-legend { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 18px; }
 .tooth-legend span { padding: 6px 9px; border-radius: 99px; font-size: 10px; }
+.clinical-map-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.clinical-map-summary article { padding: 14px 16px; border: 1px solid var(--line); border-radius: 18px; background: white; }
+.clinical-map-summary strong { display: block; font-size: 24px; line-height: 1; }
+.clinical-map-summary span { color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+.smart-tooth { position: relative; min-height: 78px; align-items: stretch; padding: 9px 6px; transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+.smart-tooth:hover { transform: translateY(-2px); box-shadow: 0 12px 24px rgba(28,28,30,.08); }
+.smart-tooth.attention::before { content: ""; position: absolute; inset: 5px 5px auto auto; width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent); }
+.smart-tooth small { align-self: center; max-width: 100%; padding: 3px 6px; border-radius: 99px; background: rgba(255,255,255,.58); color: inherit; font-weight: 900; }
+.tooth-indicators { display: flex; justify-content: center; gap: 3px; margin-top: 2px; }
+.tooth-indicators i { width: 14px; height: 14px; display: grid; place-items: center; border-radius: 50%; color: white; background: rgba(28,28,30,.38); font-size: 8px; font-style: normal; font-weight: 900; }
+.tooth-tone-healthy { color: #55715E !important; border-color: #DCE9DF !important; background: #F4FAF5 !important; }
+.tooth-tone-danger { color: #9A3B3B !important; border-color: #F0C9C9 !important; background: #F9EEEE !important; }
+.tooth-tone-previous { color: #4D7191 !important; border-color: #CADCE8 !important; background: #EDF3F7 !important; }
+.tooth-tone-crown { color: #80672E !important; border-color: #E7D7A6 !important; background: #F7F1DF !important; }
+.tooth-tone-implant { color: #5E5A54 !important; border-color: #D8D4CA !important; background: #EEECE7 !important; }
+.tooth-tone-endo { color: #865A8E !important; border-color: #E5CDE8 !important; background: #F4ECF5 !important; }
+.tooth-tone-planned { color: #705C2C !important; border-color: #E6D396 !important; background: #FBF4DC !important; }
+.tooth-tone-process { color: #8A5E2C !important; border-color: #E9CBA1 !important; background: #FFF1DF !important; }
+.tooth-tone-done { color: #47765A !important; border-color: #BFDCC8 !important; background: #ECF8EF !important; }
+.tooth-tone-watch { color: #7A681D !important; border-color: #E4D26B !important; background: #FFF9D8 !important; }
+.tooth-tone-missing { color: #777 !important; border-color: #D9D9D9 !important; background: #F0F0F0 !important; text-decoration: line-through; }
+.tooth-context-panel { margin-top: 18px; }
+.section-heading.compact { margin: 0 0 12px; }
+.tooth-focus-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+.tooth-focus-card { min-height: 88px; padding: 14px; display: grid; grid-template-columns: 44px minmax(0, 1fr); column-gap: 12px; align-items: center; border: 1px solid var(--line); border-radius: 18px; text-align: left; }
+.tooth-focus-card strong { width: 44px; height: 44px; display: grid; place-items: center; grid-row: span 2; border-radius: 50%; background: rgba(255,255,255,.62); font-size: 17px; }
+.tooth-focus-card span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 900; }
+.tooth-focus-card small { color: inherit; opacity: .76; }
+.tooth-editor-hero { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px; padding: 18px; border: 1px solid var(--line); border-radius: 20px; }
+.tooth-editor-hero > div { display: grid; grid-template-columns: 58px minmax(0, 1fr); column-gap: 14px; align-items: center; }
+.tooth-editor-hero strong { width: 58px; height: 58px; display: grid; place-items: center; grid-row: span 2; border-radius: 50%; background: rgba(255,255,255,.64); font-size: 24px; }
+.tooth-editor-hero span { font-size: 18px; font-weight: 900; }
+.tooth-editor-hero small { color: inherit; opacity: .74; }
+.tooth-linked-data { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
 .timeline { position: relative; display: flex; flex-direction: column; gap: 0; }
 .timeline::before { content: ""; position: absolute; left: 21px; top: 22px; bottom: 22px; width: 1px; background: var(--line); }
 .timeline-item { position: relative; display: grid; grid-template-columns: 44px 1fr; gap: 13px; padding: 10px 0; }
@@ -613,6 +647,30 @@ button:disabled { opacity: .55; cursor: wait; }
   --cure-success: #8FA982;
   --cure-shadow: rgba(0, 0, 0, 0.28);
 }
+
+[data-theme="dark"] .clinical-map-summary article,
+[data-theme="dark"] .tooth-editor-hero {
+  border-color: var(--cure-border);
+  background: var(--cure-surface);
+}
+
+[data-theme="dark"] .smart-tooth small,
+[data-theme="dark"] .tooth-focus-card strong,
+[data-theme="dark"] .tooth-editor-hero strong {
+  background: rgba(255,255,255,.08);
+}
+
+[data-theme="dark"] .tooth-tone-healthy { color: #9FC7A8 !important; border-color: color-mix(in srgb, #9FC7A8 26%, var(--cure-border)) !important; background: color-mix(in srgb, #9FC7A8 13%, var(--cure-surface)) !important; }
+[data-theme="dark"] .tooth-tone-danger { color: #F0A09B !important; border-color: color-mix(in srgb, #F0A09B 30%, var(--cure-border)) !important; background: color-mix(in srgb, #E86B5D 14%, var(--cure-surface)) !important; }
+[data-theme="dark"] .tooth-tone-previous { color: #9DC3DF !important; border-color: color-mix(in srgb, #9DC3DF 28%, var(--cure-border)) !important; background: color-mix(in srgb, #6EA8CF 14%, var(--cure-surface)) !important; }
+[data-theme="dark"] .tooth-tone-crown { color: #E1C978 !important; border-color: color-mix(in srgb, #E1C978 30%, var(--cure-border)) !important; background: color-mix(in srgb, #C8B77A 14%, var(--cure-surface)) !important; }
+[data-theme="dark"] .tooth-tone-implant { color: #C7C1B7 !important; border-color: color-mix(in srgb, #C7C1B7 25%, var(--cure-border)) !important; background: color-mix(in srgb, #AAA197 13%, var(--cure-surface)) !important; }
+[data-theme="dark"] .tooth-tone-endo { color: #D7A8DF !important; border-color: color-mix(in srgb, #D7A8DF 28%, var(--cure-border)) !important; background: color-mix(in srgb, #B375BD 14%, var(--cure-surface)) !important; }
+[data-theme="dark"] .tooth-tone-planned { color: #E4D189 !important; border-color: color-mix(in srgb, #E4D189 30%, var(--cure-border)) !important; background: color-mix(in srgb, #C8B77A 15%, var(--cure-surface)) !important; }
+[data-theme="dark"] .tooth-tone-process { color: #E7B177 !important; border-color: color-mix(in srgb, #E7B177 30%, var(--cure-border)) !important; background: color-mix(in srgb, #C58B4D 14%, var(--cure-surface)) !important; }
+[data-theme="dark"] .tooth-tone-done { color: #9CCF9B !important; border-color: color-mix(in srgb, #9CCF9B 30%, var(--cure-border)) !important; background: color-mix(in srgb, #73B277 14%, var(--cure-surface)) !important; }
+[data-theme="dark"] .tooth-tone-watch { color: #E7D36F !important; border-color: color-mix(in srgb, #E7D36F 30%, var(--cure-border)) !important; background: color-mix(in srgb, #C8B77A 14%, var(--cure-surface)) !important; }
+[data-theme="dark"] .tooth-tone-missing { color: #A1A1A6 !important; border-color: var(--cure-border) !important; background: var(--cure-surface-soft) !important; }
 
 html,
 body {
@@ -2582,6 +2640,30 @@ select {
 
   .dental-chart {
     padding: 17px 12px;
+  }
+
+  .clinical-map-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .clinical-map-summary article {
+    padding: 12px;
+  }
+
+  .smart-tooth {
+    min-width: 48px;
+    min-height: 72px;
+    padding: 8px 5px;
+  }
+
+  .tooth-focus-grid,
+  .tooth-linked-data {
+    grid-template-columns: 1fr;
+  }
+
+  .tooth-editor-hero {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .patient-photo {

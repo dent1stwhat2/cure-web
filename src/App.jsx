@@ -54,6 +54,27 @@ const diaryEntries = (patient) => Array.isArray(patient?.dental?.diary_entries)
   ? patient.dental.diary_entries
   : [];
 const toothChart = (patient) => patient?.dental?.tooth_chart || {};
+const toothStatusCatalog = [
+  { value: "Здоров", label: "Здоров", short: "OK", tone: "healthy" },
+  { value: "Кариес", label: "Кариес", short: "CAR", tone: "danger" },
+  { value: "Пульпит", label: "Пульпит", short: "PUL", tone: "danger" },
+  { value: "Периодонтит", label: "Периодонтит", short: "PER", tone: "danger" },
+  { value: "Пломба", label: "Пломба", short: "ПЛ", tone: "previous" },
+  { value: "Коронка", label: "Коронка", short: "КР", tone: "crown" },
+  { value: "Имплантат", label: "Имплантат", short: "IMP", tone: "implant" },
+  { value: "Канал", label: "Эндо / канал", short: "ENDO", tone: "endo" },
+  { value: "Запланировано", label: "Запланировано", short: "PLAN", tone: "planned" },
+  { value: "В процессе", label: "В процессе", short: "↻", tone: "process" },
+  { value: "Выполнено", label: "Выполнено", short: "✓", tone: "done" },
+  { value: "Наблюдение", label: "Наблюдение", short: "OBS", tone: "watch" },
+  { value: "Удалён", label: "Удалён", short: "—", tone: "missing" }
+];
+const toothStatusMeta = (status = "Здоров") => toothStatusCatalog.find((item) => item.value === status) || toothStatusCatalog[0];
+const toothIsProblem = (status = "") => ["Кариес", "Пульпит", "Периодонтит"].includes(status);
+const toothRows = [
+  ["Верхняя челюсть", ["18", "17", "16", "15", "14", "13", "12", "11", "21", "22", "23", "24", "25", "26", "27", "28"]],
+  ["Нижняя челюсть", ["48", "47", "46", "45", "44", "43", "42", "41", "31", "32", "33", "34", "35", "36", "37", "38"]]
+];
 const sameDay = (left, right) => {
   return localDateISO(left) === localDateISO(right);
 };
@@ -1011,7 +1032,7 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
       {section === "Дневник" && <PatientDiary patient={patient} clinicId={clinicId} refresh={refresh} notify={notify} />}
       {section === "Анамнез" && <Anamnesis patient={patient} />}
       {section === "Зубная формула" && (
-        <DentalChart patient={patient} onSelect={setToothEditor} />
+        <DentalChart patient={patient} data={data} onSelect={setToothEditor} />
       )}
       {section === "История" && (
         <PatientTimeline patient={patient} data={data} />
@@ -1065,6 +1086,7 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
         <ToothEditor
           patient={patient}
           tooth={toothEditor}
+          data={data}
           clinicId={clinicId}
           onClose={() => setToothEditor(null)}
           onSaved={async () => { await refresh(); setToothEditor(null); notify("Зубная формула обновлена"); }}
@@ -1248,52 +1270,139 @@ function TreatmentPlanEditor({ patient, item, clinicId, onClose, onSaved }) {
   );
 }
 
-function DentalChart({ patient, onSelect }) {
+function toothClinicalContext(patient, data = {}, tooth) {
   const chart = toothChart(patient);
-  const rows = [
-    ["Верхняя челюсть", ["18", "17", "16", "15", "14", "13", "12", "11", "21", "22", "23", "24", "25", "26", "27", "28"]],
-    ["Нижняя челюсть", ["48", "47", "46", "45", "44", "43", "42", "41", "31", "32", "33", "34", "35", "36", "37", "38"]]
-  ];
+  const record = chart[tooth] || {};
+  const plan = treatmentItems(patient).filter((item) => extractPlanTeeth(`${item.teeth || ""} ${item.notes || ""}`).includes(tooth));
+  const activePlan = plan.filter((item) => item.status !== "Отменено");
+  const diary = diaryEntries(patient).filter((entry) => extractPlanTeeth(`${entry.teeth || ""} ${entry.title || ""} ${entry.text || ""} ${entry.next_step || ""}`).includes(tooth));
+  const visits = (data.visits || []).filter((visit) => visit.patient_id === patient.id && extractPlanTeeth(`${visit.teeth || ""} ${visit.diagnosis || ""} ${visit.procedure_description || ""}`).includes(tooth));
+  const visitIds = new Set(visits.map((visit) => visit.id));
+  const photos = (data.photos || []).filter((photo) => photo.patient_id === patient.id && photo.visit_id && visitIds.has(photo.visit_id));
+  const latestVisit = visits.sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+  const lastPlan = activePlan[activePlan.length - 1];
+  const autoStatus = activePlan.some((item) => item.status === "В процессе")
+    ? "В процессе"
+    : activePlan.some((item) => item.status === "Запланировано")
+      ? "Запланировано"
+      : activePlan.some((item) => item.status === "Выполнено")
+        ? "Выполнено"
+        : "Здоров";
+  const status = record.status && record.status !== "Здоров" ? record.status : autoStatus;
+  const meta = toothStatusMeta(status);
+  const attention = toothIsProblem(status) || activePlan.some((item) => item.status !== "Выполнено") || diary.some((entry) => entry.type === "Риск");
+  return {
+    record,
+    status,
+    meta,
+    plan,
+    activePlan,
+    diary,
+    visits,
+    photos,
+    latestVisit,
+    lastPlan,
+    attention,
+    title: record.diagnosis || lastPlan?.name || latestVisit?.diagnosis || meta.label,
+    subtitle: [
+      activePlan.length ? `${activePlan.length} в плане` : "",
+      visits.length ? `${visits.length} виз.` : "",
+      diary.length ? `${diary.length} дневн.` : "",
+      photos.length ? `${photos.length} фото` : ""
+    ].filter(Boolean).join(" · ")
+  };
+}
+
+function dentalOverview(patient, data = {}) {
+  const contexts = toothRows.flatMap(([, teeth]) => teeth.map((tooth) => [tooth, toothClinicalContext(patient, data, tooth)]));
+  return {
+    contexts,
+    problems: contexts.filter(([, context]) => toothIsProblem(context.status)),
+    planned: contexts.filter(([, context]) => context.activePlan.some((item) => item.status !== "Выполнено")),
+    done: contexts.filter(([, context]) => context.status === "Выполнено"),
+    missing: contexts.filter(([, context]) => context.status === "Удалён"),
+    observed: contexts.filter(([, context]) => context.status === "Наблюдение")
+  };
+}
+
+function DentalChart({ patient, data, onSelect }) {
+  const overview = dentalOverview(patient, data);
+  const quickList = [...overview.problems, ...overview.planned, ...overview.observed]
+    .filter(([tooth], index, array) => array.findIndex(([candidate]) => candidate === tooth) === index)
+    .slice(0, 8);
   return (
     <div className="section-block dental-chart-section">
-      <div className="section-heading"><div><h2>Зубная формула</h2><p>Нажмите на зуб, чтобы указать состояние</p></div></div>
+      <div className="section-heading"><div><h2>Умная клиническая карта</h2><p>Зубная формула, план лечения, дневник, визиты и фото в одном месте</p></div></div>
+      <div className="clinical-map-summary">
+        <article><strong>{overview.problems.length}</strong><span>проблемных</span></article>
+        <article><strong>{overview.planned.length}</strong><span>в плане</span></article>
+        <article><strong>{overview.done.length}</strong><span>выполнено</span></article>
+        <article><strong>{overview.missing.length}</strong><span>удалено</span></article>
+      </div>
       <div className="dental-chart card">
-        {rows.map(([label, teeth]) => (
+        {toothRows.map(([label, teeth]) => (
           <div className="jaw-row" key={label}>
             <span>{label}</span>
             <div>{teeth.map((number) => {
-              const record = chart[number];
+              const context = toothClinicalContext(patient, data, number);
               return (
-                <button key={number} className={`tooth ${record?.status ? `tooth-${record.status}` : ""}`} onClick={() => onSelect(number)}>
+                <button key={number} className={`tooth smart-tooth tooth-tone-${context.meta.tone} ${context.attention ? "attention" : ""}`} onClick={() => onSelect(number)} title={`Зуб ${number}: ${context.title}`}>
                   <strong>{number}</strong>
-                  <small>{record?.short || record?.status || "Здоров"}</small>
+                  <small>{context.record.short || context.meta.short}</small>
+                  {(context.activePlan.length > 0 || context.visits.length > 0 || context.photos.length > 0) && (
+                    <span className="tooth-indicators">
+                      {context.activePlan.length > 0 && <i>P</i>}
+                      {context.visits.length > 0 && <i>V</i>}
+                      {context.photos.length > 0 && <i>F</i>}
+                    </span>
+                  )}
                 </button>
               );
             })}</div>
           </div>
         ))}
         <div className="tooth-legend">
-          {["Кариес", "Пломба", "Коронка", "Имплантат", "Канал", "Удалён"].map((status) => <span key={status} className={`tooth-${status}`}>{status}</span>)}
+          {toothStatusCatalog.filter((item) => item.value !== "Здоров").map((status) => <span key={status.value} className={`tooth-tone-${status.tone}`}>{status.label}</span>)}
         </div>
+      </div>
+      <div className="tooth-context-panel">
+        <div className="section-heading compact"><div><h2>Активные клинические фокусы</h2><p>{quickList.length ? "Зубы, которые требуют внимания или уже находятся в плане" : "Проблемные зубы и незавершённые планы появятся здесь автоматически"}</p></div></div>
+        {quickList.length ? (
+          <div className="tooth-focus-grid">
+            {quickList.map(([tooth, context]) => (
+              <button className={`tooth-focus-card tooth-tone-${context.meta.tone}`} key={tooth} onClick={() => onSelect(tooth)}>
+                <strong>{tooth}</strong>
+                <span>{context.title}</span>
+                <small>{context.subtitle || context.meta.label}</small>
+              </button>
+            ))}
+          </div>
+        ) : <Empty icon={<Stethoscope />} title="Карта спокойная" text="Добавьте диагноз, план лечения или запись дневника по конкретному зубу — карта сама соберёт клиническую сводку." />}
       </div>
     </div>
   );
 }
 
-function ToothEditor({ patient, tooth, clinicId, onClose, onSaved }) {
+function ToothEditor({ patient, tooth, data, clinicId, onClose, onSaved }) {
   const existing = toothChart(patient)[tooth] || {};
   const [form, setForm] = useState({
     status: existing.status || "Здоров",
     diagnosis: existing.diagnosis || "",
+    short: existing.short || "",
+    risk: existing.risk || "",
+    prognosis: existing.prognosis || "",
+    next_step: existing.next_step || "",
     note: existing.note || ""
   });
   const [busy, setBusy] = useState(false);
+  const context = toothClinicalContext(patient, data, tooth);
+  const canClear = form.status === "Здоров" && !form.diagnosis.trim() && !form.short.trim() && !form.risk.trim() && !form.prognosis.trim() && !form.next_step.trim() && !form.note.trim();
   const save = async (event) => {
     event.preventDefault();
     setBusy(true);
     try {
       const nextChart = { ...toothChart(patient) };
-      if (form.status === "Здоров" && !form.diagnosis.trim() && !form.note.trim()) delete nextChart[tooth];
+      if (canClear) delete nextChart[tooth];
       else nextChart[tooth] = { ...form, updated_at: new Date().toISOString() };
       await savePatient(clinicId, { ...patient, dental: { ...(patient.dental || {}), tooth_chart: nextChart } });
       await onSaved();
@@ -1304,16 +1413,36 @@ function ToothEditor({ patient, tooth, clinicId, onClose, onSaved }) {
     }
   };
   return (
-    <Modal title={`Зуб ${tooth}`} onClose={onClose}>
+    <Modal title={`Клиническая карточка зуба ${tooth}`} onClose={onClose} large>
       <form onSubmit={save}>
+        <div className={`tooth-editor-hero tooth-tone-${context.meta.tone}`}>
+          <div><strong>{tooth}</strong><span>{context.title}</span><small>{context.subtitle || "Ручная клиническая карточка"}</small></div>
+          <StatusBadge status={context.status} />
+        </div>
         <div className="form-grid">
-          <Field label="Состояние" full>
+          <Field label="Состояние">
             <select value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}>
-              {["Здоров", "Кариес", "Пломба", "Коронка", "Имплантат", "Канал", "Удалён", "Наблюдение"].map((status) => <option key={status}>{status}</option>)}
+              {toothStatusCatalog.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
             </select>
           </Field>
-          <Field label="Диагноз" full><input value={form.diagnosis} onChange={(event) => setForm((current) => ({ ...current, diagnosis: event.target.value }))} /></Field>
-          <Field label="Комментарий" full><textarea value={form.note} onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))} /></Field>
+          <Field label="Короткая метка">
+            <input value={form.short} onChange={(event) => setForm((current) => ({ ...current, short: event.target.value }))} placeholder="Напр.: MOD, E-max, 2.6" />
+          </Field>
+          <Field label="Диагноз / находка" full><input value={form.diagnosis} onChange={(event) => setForm((current) => ({ ...current, diagnosis: event.target.value }))} placeholder="Например: кариес дентина, наблюдение, ранее лечен" /></Field>
+          <Field label="Риск"><input value={form.risk} onChange={(event) => setForm((current) => ({ ...current, risk: event.target.value }))} placeholder="Скол, боль, перегрузка..." /></Field>
+          <Field label="Прогноз"><select value={form.prognosis} onChange={(event) => setForm((current) => ({ ...current, prognosis: event.target.value }))}><option value="">Не указан</option>{["Благоприятный", "Осторожный", "Сомнительный", "Неблагоприятный"].map((value) => <option key={value}>{value}</option>)}</select></Field>
+          <Field label="Следующее действие" full><textarea value={form.next_step} onChange={(event) => setForm((current) => ({ ...current, next_step: event.target.value }))} placeholder="Что сделать на следующем визите или что обсудить с пациентом" /></Field>
+          <Field label="Комментарий врача" full><textarea value={form.note} onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))} placeholder="Материалы, наблюдения, нюансы, договорённости" /></Field>
+        </div>
+        <div className="tooth-linked-data">
+          <InfoCard title="Связанные этапы плана" icon={<ClipboardList />}>
+            {context.plan.length ? context.plan.map((item) => <InfoRow key={item.id} label={item.status || "План"} value={`${item.name} · ${money.format(item.price || 0)}`} />) : <p className="muted">Этапов по этому зубу пока нет.</p>}
+          </InfoCard>
+          <InfoCard title="Визиты и дневник" icon={<History />}>
+            {context.visits.slice(0, 3).map((visit) => <InfoRow key={visit.id} label={safeDate(visit.date)} value={visit.diagnosis || visit.procedure_description || visit.treatment_type} />)}
+            {context.diary.slice(0, 3).map((entry) => <InfoRow key={entry.id} label={entry.type} value={entry.title || entry.text} />)}
+            {!context.visits.length && !context.diary.length && <p className="muted">Записей по этому зубу пока нет.</p>}
+          </InfoCard>
         </div>
         <ModalActions busy={busy} onCancel={onClose} />
       </form>
