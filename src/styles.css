@@ -2853,4 +2853,100 @@ select {
     color: var(--cure-text-muted);
     background: var(--cure-surface-soft);
   }
+
+  :root:not([data-theme="light"]) .clinical-map-summary article,
+  :root:not([data-theme="light"]) .tooth-editor-hero {
+    color: var(--cure-text);
+    border-color: var(--cure-border);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--cure-surface) 92%, #fff 8%), var(--cure-surface));
+    box-shadow: 0 14px 34px rgba(0,0,0,.22);
+  }
+
+  :root:not([data-theme="light"]) .clinical-map-summary strong {
+    color: var(--cure-text);
+  }
+
+  :root:not([data-theme="light"]) .clinical-map-summary span {
+    color: var(--cure-text-muted);
+  }
+
+  :root:not([data-theme="light"]) .smart-tooth,
+  :root:not([data-theme="light"]) .tooth-focus-card,
+  :root:not([data-theme="light"]) .tooth-diagnosis-picker button,
+  :root:not([data-theme="light"]) .tooth-photo-thumb,
+  :root:not([data-theme="light"]) .tooth-photo-empty {
+    box-shadow: none;
+  }
+
+  :root:not([data-theme="light"]) .smart-tooth small,
+  :root:not([data-theme="light"]) .tooth-focus-card strong,
+  :root:not([data-theme="light"]) .tooth-editor-hero strong {
+    background: rgba(255,255,255,.08);
+  }
+
+  :root:not([data-theme="light"]) .tooth-tone-healthy {
+    color: #B7D2BC !important;
+    border-color: color-mix(in srgb, #9FC7A8 22%, var(--cure-border)) !important;
+    background: linear-gradient(135deg, color-mix(in srgb, #9FC7A8 9%, var(--cure-surface)), var(--cure-surface-soft)) !important;
+  }
+
+  :root:not([data-theme="light"]) .tooth-tone-danger {
+    color: #F2A8A2 !important;
+    border-color: color-mix(in srgb, #F0A09B 32%, var(--cure-border)) !important;
+    background: linear-gradient(135deg, color-mix(in srgb, #E86B5D 18%, var(--cure-surface)), var(--cure-surface-soft)) !important;
+  }
+
+  :root:not([data-theme="light"]) .tooth-tone-previous {
+    color: #B5D4E8 !important;
+    border-color: color-mix(in srgb, #9DC3DF 26%, var(--cure-border)) !important;
+    background: linear-gradient(135deg, color-mix(in srgb, #6EA8CF 13%, var(--cure-surface)), var(--cure-surface-soft)) !important;
+  }
+
+  :root:not([data-theme="light"]) .tooth-tone-crown {
+    color: #E7D084 !important;
+    border-color: color-mix(in srgb, #E1C978 30%, var(--cure-border)) !important;
+    background: linear-gradient(135deg, color-mix(in srgb, #C8B77A 15%, var(--cure-surface)), var(--cure-surface-soft)) !important;
+  }
+
+  :root:not([data-theme="light"]) .tooth-tone-implant {
+    color: #D0CBC2 !important;
+    border-color: color-mix(in srgb, #C7C1B7 24%, var(--cure-border)) !important;
+    background: linear-gradient(135deg, color-mix(in srgb, #AAA197 12%, var(--cure-surface)), var(--cure-surface-soft)) !important;
+  }
+
+  :root:not([data-theme="light"]) .tooth-tone-endo {
+    color: #DEB5E5 !important;
+    border-color: color-mix(in srgb, #D7A8DF 28%, var(--cure-border)) !important;
+    background: linear-gradient(135deg, color-mix(in srgb, #B375BD 14%, var(--cure-surface)), var(--cure-surface-soft)) !important;
+  }
+
+  :root:not([data-theme="light"]) .tooth-tone-planned {
+    color: #E7D48B !important;
+    border-color: color-mix(in srgb, #E4D189 30%, var(--cure-border)) !important;
+    background: linear-gradient(135deg, color-mix(in srgb, #C8B77A 15%, var(--cure-surface)), var(--cure-surface-soft)) !important;
+  }
+
+  :root:not([data-theme="light"]) .tooth-tone-process {
+    color: #E9B77F !important;
+    border-color: color-mix(in srgb, #E7B177 30%, var(--cure-border)) !important;
+    background: linear-gradient(135deg, color-mix(in srgb, #C58B4D 15%, var(--cure-surface)), var(--cure-surface-soft)) !important;
+  }
+
+  :root:not([data-theme="light"]) .tooth-tone-done {
+    color: #A7D4A6 !important;
+    border-color: color-mix(in srgb, #9CCF9B 30%, var(--cure-border)) !important;
+    background: linear-gradient(135deg, color-mix(in srgb, #73B277 14%, var(--cure-surface)), var(--cure-surface-soft)) !important;
+  }
+
+  :root:not([data-theme="light"]) .tooth-tone-watch {
+    color: #EAD978 !important;
+    border-color: color-mix(in srgb, #E7D36F 30%, var(--cure-border)) !important;
+    background: linear-gradient(135deg, color-mix(in srgb, #C8B77A 14%, var(--cure-surface)), var(--cure-surface-soft)) !important;
+  }
+
+  :root:not([data-theme="light"]) .tooth-tone-missing {
+    color: #A1A1A6 !important;
+    border-color: var(--cure-border) !important;
+    background: var(--cure-surface-soft) !important;
+  }
 }
