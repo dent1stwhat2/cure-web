@@ -150,6 +150,36 @@ const isSyncedVisitIncome = (t) => t.type === "Доход" && t.visit_id && t.co
 const isSyncedVisitRefund = (t) => t.type === "Возврат" && t.visit_id && t.comment === "Возврат по визиту";
 const isManualIncome = (t) => isIncome(t) && !isSyncedVisitIncome(t);
 const isManualRefund = (t) => t.type === "Возврат" && !isSyncedVisitRefund(t);
+const DEFAULT_VISIT_DURATION_MINUTES = 60;
+const MAX_PHOTO_SIZE_MB = 15;
+const MAX_PHOTO_SIZE_BYTES = MAX_PHOTO_SIZE_MB * 1024 * 1024;
+const validImageTypes = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
+const validImageExtensions = [".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"];
+const isAcceptedImageFile = (file) => {
+  const name = file.name?.toLowerCase() || "";
+  return file.type?.startsWith("image/") || validImageTypes.includes(file.type) || validImageExtensions.some((extension) => name.endsWith(extension));
+};
+const visitInterval = (value, duration = DEFAULT_VISIT_DURATION_MINUTES) => {
+  const start = new Date(value).getTime();
+  return { start, end: start + duration * 60000 };
+};
+const intervalsOverlap = (left, right) => left.start < right.end && right.start < left.end;
+const phoneValidationMessage = (value = "") => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/[A-Za-zА-Яа-яЁё]/.test(text)) return "Телефон не должен содержать буквы.";
+  const digits = text.replace(/\D/g, "");
+  if (digits.length < 10 || digits.length > 15) return "Телефон должен содержать от 10 до 15 цифр.";
+  return "";
+};
+const normalizePhone = (value = "") => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  let digits = text.replace(/\D/g, "");
+  if (digits.length === 10 && digits.startsWith("9")) digits = `7${digits}`;
+  if (digits.length === 11 && digits.startsWith("8")) digits = `7${digits.slice(1)}`;
+  return `+${digits}`;
+};
 
 export default function App() {
   const [session, setSession] = useState(cloudEnabled ? null : { user: { email: "demo@cure.app", id: "demo" } });
@@ -159,14 +189,19 @@ export default function App() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState("");
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
 
   useEffect(() => {
     if (!cloudEnabled) return;
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
+      if (window.location.hash.includes("type=recovery") || window.location.search.includes("type=recovery")) setPasswordRecovery(true);
       setAuthReady(true);
     });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));
+    const { data: listener } = supabase.auth.onAuthStateChange((event, next) => {
+      setSession(next);
+      if (event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
+    });
     return () => listener.subscription.unsubscribe();
   }, []);
 
@@ -225,6 +260,7 @@ export default function App() {
 
   if (!authReady) return <Splash />;
   if (!session) return <AuthScreen onMessage={setToast} />;
+  if (passwordRecovery) return <PasswordUpdateScreen onDone={() => { setPasswordRecovery(false); setToast("Пароль обновлён"); }} />;
   if (cloudEnabled && membership === undefined) return <Splash label="Открываем клинику…" />;
   if (!membership) {
     return <ClinicOnboarding session={session} onJoined={setMembership} onMessage={setToast} />;
@@ -293,6 +329,19 @@ function AuthScreen({ onMessage }) {
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail) {
       setFormError("Введите адрес электронной почты.");
+      return;
+    }
+    if (mode === "reset") {
+      setBusy(true);
+      const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+        redirectTo: `${window.location.origin}${import.meta.env.BASE_URL}`
+      });
+      setBusy(false);
+      if (error) {
+        setFormError(error.message || "Не удалось отправить письмо восстановления.");
+      } else {
+        setFormError("Мы отправили письмо для восстановления пароля. Проверьте почту и папку «Спам».");
+      }
       return;
     }
     if (password.length < 8) {
@@ -428,9 +477,9 @@ function AuthScreen({ onMessage }) {
           <button className={mode === "register" ? "active" : ""} onClick={() => changeMode("register")}>Регистрация</button>
           <button className={mode === "join" ? "active" : ""} onClick={() => changeMode("join")}>По коду</button>
         </div>
-        <h2>{mode === "login" ? "С возвращением" : mode === "join" ? "Войти в клинику" : "Создать аккаунт"}</h2>
+        <h2>{mode === "login" ? "С возвращением" : mode === "join" ? "Войти в клинику" : mode === "reset" ? "Восстановить пароль" : "Создать аккаунт"}</h2>
         <p className="muted">
-          {mode === "login" ? "Войдите в общую клинику CURE." : mode === "join" ? "Введите код клиники, ФИО, должность и данные для личного входа." : "Создайте аккаунт владельца, а затем новую клинику."}
+          {mode === "login" ? "Войдите в общую клинику CURE." : mode === "join" ? "Введите код клиники, ФИО, должность и данные для личного входа." : mode === "reset" ? "Введите email — мы отправим ссылку для восстановления доступа." : "Создайте аккаунт владельца, а затем новую клинику."}
         </p>
         <form onSubmit={submit} className="stack">
           {mode === "join" && <Field label="Код клиники">
@@ -449,9 +498,11 @@ function AuthScreen({ onMessage }) {
           <Field label="Email">
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" placeholder="doctor@clinic.ru" />
           </Field>
-          <Field label="Пароль">
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder="Минимум 8 символов" />
-          </Field>
+          {mode !== "reset" && (
+            <Field label="Пароль">
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder="Минимум 8 символов" />
+            </Field>
+          )}
           {mode !== "login" && (
             <Field label="Подтверждение пароля">
               <input
@@ -464,9 +515,62 @@ function AuthScreen({ onMessage }) {
             </Field>
           )}
           {formError && <div className="auth-error" role="alert">{formError}</div>}
-          <button className="primary wide" disabled={busy}>{busy ? "Подождите…" : mode === "login" ? "Войти в CURE" : mode === "join" ? "Зарегистрироваться и войти по коду" : "Зарегистрироваться"}</button>
+          <button className="primary wide" disabled={busy}>{busy ? "Подождите…" : mode === "login" ? "Войти в CURE" : mode === "join" ? "Зарегистрироваться и войти по коду" : mode === "reset" ? "Отправить письмо" : "Зарегистрироваться"}</button>
         </form>
+        {mode === "login" && <button className="link-button wide" onClick={() => changeMode("reset")}>Забыли пароль?</button>}
+        {mode === "reset" && <button className="link-button wide" onClick={() => changeMode("login")}>Вернуться ко входу</button>}
         <p className="privacy-note"><LockKeyhole size={15} /> Медицинские данные доступны только участникам вашей клиники.</p>
+      </section>
+    </main>
+  );
+}
+
+function PasswordUpdateScreen({ onDone }) {
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event) => {
+    event.preventDefault();
+    setError("");
+    if (password.length < 8) return setError("Пароль должен содержать минимум 8 символов.");
+    if (password !== confirmPassword) return setError("Пароли не совпадают.");
+    setBusy(true);
+    const { error: updateError } = await supabase.auth.updateUser({ password });
+    setBusy(false);
+    if (updateError) {
+      setError(updateError.message || "Не удалось обновить пароль.");
+      return;
+    }
+    onDone();
+  };
+  return (
+    <main className="auth-layout">
+      <section className="auth-hero">
+        <BrandMark />
+        <div>
+          <p className="eyebrow">ВОССТАНОВЛЕНИЕ ДОСТУПА</p>
+          <h1>CURE</h1>
+          <p>Введите новый пароль для вашего аккаунта клиники.</p>
+        </div>
+        <div className="trust-row">
+          <ShieldCheck /><span>Защищённый вход</span>
+          <LockKeyhole /><span>Новый пароль</span>
+        </div>
+      </section>
+      <section className="auth-card">
+        <h2>Новый пароль</h2>
+        <p className="muted">Пароль должен содержать минимум 8 символов.</p>
+        <form onSubmit={submit} className="stack">
+          <Field label="Новый пароль">
+            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" autoFocus />
+          </Field>
+          <Field label="Повторите пароль">
+            <input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" />
+          </Field>
+          {error && <div className="auth-error" role="alert">{error}</div>}
+          <button className="primary wide" disabled={busy}>{busy ? "Сохраняем…" : "Сохранить новый пароль"}</button>
+        </form>
       </section>
     </main>
   );
@@ -1082,7 +1186,7 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
       {editPatient && <PatientEditor patient={patient} visits={data.visits} clinicId={clinicId} onClose={() => setEditPatient(false)} onSaved={async (message) => { await refresh(); setEditPatient(false); notify(message || "Карточка обновлена"); }} />}
       {visitEditor && <VisitEditor patient={patient} visit={visitEditor.id ? visitEditor : null} visits={data.visits} clinicId={clinicId} onClose={() => setVisitEditor(null)} onSaved={async () => { await refresh(); setVisitEditor(null); notify("Визит сохранён"); }} />}
       {photoEditor && <PhotoUploader patient={patient} visits={visits} clinicId={clinicId} onClose={() => setPhotoEditor(false)} onSaved={async () => { await refresh(); setPhotoEditor(false); notify("Фотографии добавлены"); }} />}
-      {txEditor && <TransactionEditor patients={data.patients} visits={data.visits} presetPatient={patient} clinicId={clinicId} onClose={() => setTxEditor(false)} onSaved={async () => { await refresh(); setTxEditor(false); notify("Финансовая запись сохранена"); }} />}
+      {txEditor && <TransactionEditor patients={data.patients} visits={data.visits} transactions={data.transactions} presetPatient={patient} clinicId={clinicId} onClose={() => setTxEditor(false)} onSaved={async () => { await refresh(); setTxEditor(false); notify("Финансовая запись сохранена"); }} />}
       {treatmentEditor && (
         <TreatmentPlanEditor
           patient={patient}
@@ -2566,7 +2670,7 @@ function FinancePage({ data, clinicId, refresh, notify }) {
         if (!confirm("Удалить финансовую запись?")) return;
         await deleteTransaction(clinicId, t.id); await refresh(); notify("Запись удалена");
       }} />
-      {editor && <TransactionEditor patients={data.patients} visits={data.visits} clinicId={clinicId} onClose={() => setEditor(false)} onSaved={async () => { await refresh(); setEditor(false); notify("Финансовая запись сохранена"); }} />}
+      {editor && <TransactionEditor patients={data.patients} visits={data.visits} transactions={data.transactions} clinicId={clinicId} onClose={() => setEditor(false)} onSaved={async () => { await refresh(); setEditor(false); notify("Финансовая запись сохранена"); }} />}
     </section>
   );
 }
@@ -2588,12 +2692,28 @@ function PatientEditor({ patient, visits = [], clinicId, onClose, onSaved }) {
     if (!form.full_name.trim()) return alert("Введите ФИО пациента");
     if (form.birth_date && new Date(form.birth_date) > new Date()) return alert("Дата рождения не может быть в будущем");
     if (nextAppointment && new Date(nextAppointment) < new Date()) return alert("Следующая запись не может быть в прошлом");
-    if (!patient && nextAppointment && visits.some((visit) => visitMinuteKey(visit.date) === visitMinuteKey(nextAppointment))) {
-      return alert(`На ${safeDate(nextAppointment)} в ${timeLabel(nextAppointment)} уже есть запись. Выберите другое время.`);
+    const phoneError = phoneValidationMessage(form.phone);
+    if (phoneError) return alert(`Основной телефон: ${phoneError}`);
+    const secondPhoneError = phoneValidationMessage(form.second_phone);
+    if (secondPhoneError) return alert(`Дополнительный телефон: ${secondPhoneError}`);
+    const representativePhoneError = phoneValidationMessage(representative.phone);
+    if (representativePhoneError) return alert(`Телефон представителя: ${representativePhoneError}`);
+    if (!patient && nextAppointment) {
+      const nextInterval = visitInterval(nextAppointment);
+      const conflict = visits.find((visit) => intervalsOverlap(visitInterval(visit.date), nextInterval));
+      if (conflict) {
+        return alert(`На ${safeDate(nextAppointment)} в ${timeLabel(nextAppointment)} есть пересечение с другой записью (${timeLabel(conflict.date)}–${timeLabel(new Date(new Date(conflict.date).getTime() + DEFAULT_VISIT_DURATION_MINUTES * 60000))}). Выберите другое время.`);
+      }
+    }
+    const payload = structuredClone(form);
+    payload.phone = normalizePhone(payload.phone);
+    payload.second_phone = normalizePhone(payload.second_phone);
+    if (payload.dental?.communication?.representative?.phone) {
+      payload.dental.communication.representative.phone = normalizePhone(payload.dental.communication.representative.phone);
     }
     setBusy(true);
     try {
-      const savedPatient = await savePatient(clinicId, form);
+      const savedPatient = await savePatient(clinicId, payload);
       if (!patient && nextAppointment) {
         await saveVisit(clinicId, {
           patient_id: savedPatient.id,
@@ -2740,10 +2860,12 @@ function VisitEditor({ patient, visit, presetDate, visits = [], clinicId, onClos
     if (!form.date) return alert("Укажите дату и время визита");
     if ([form.total_cost, form.paid_amount, form.discount, form.refund].some((v) => Number(v) < 0)) return alert("Сумма не может быть отрицательной");
     if (Number(form.paid_amount) > Number(form.total_cost) - Number(form.discount) + Number(form.refund)) return alert("Оплата превышает стоимость");
-    const conflict = visits.find((item) => item.id !== form.id && visitMinuteKey(item.date) === visitMinuteKey(form.date));
+    const targetInterval = visitInterval(form.date);
+    const conflict = visits.find((item) => item.id !== form.id && intervalsOverlap(visitInterval(item.date), targetInterval));
     if (conflict) {
       const conflictPatient = conflict.patient_name || "";
-      return alert(`На ${safeDate(form.date)} в ${timeLabel(form.date)} уже есть запись${conflictPatient ? `: ${conflictPatient}` : ""}. Выберите другое время.`);
+      const conflictEnd = new Date(new Date(conflict.date).getTime() + DEFAULT_VISIT_DURATION_MINUTES * 60000);
+      return alert(`На ${safeDate(form.date)} в ${timeLabel(form.date)} есть пересечение с записью ${timeLabel(conflict.date)}–${timeLabel(conflictEnd)}${conflictPatient ? `: ${conflictPatient}` : ""}. Выберите другое время.`);
     }
     const payload = {
       ...form,
@@ -2805,7 +2927,7 @@ function VisitEditor({ patient, visit, presetDate, visits = [], clinicId, onClos
   );
 }
 
-function TransactionEditor({ patients, visits, presetPatient, clinicId, onClose, onSaved }) {
+function TransactionEditor({ patients, visits, transactions = [], presetPatient, clinicId, onClose, onSaved }) {
   const [form, setForm] = useState({
     type: "Доход", amount: "", date: new Date().toISOString().slice(0, 16),
     category: "Консультация", payment_method: "Карта",
@@ -2819,10 +2941,25 @@ function TransactionEditor({ patients, visits, presetPatient, clinicId, onClose,
       ? ["Лечение", "Визит", "Лаборатория", "Ортопедическая конструкция", "Имплантация", "Другое"]
     : ["Консультация", "Терапия", "Хирургия", "Ортопедия", "Ортодонтия", "Гигиена", "Имплантация", "Пародонтология", "Другое"];
   const patientVisits = visits.filter((v) => v.patient_id === form.patient_id);
+  const selectedVisit = visits.find((visit) => visit.id === form.visit_id);
+  const hasAutoVisitIncome = form.visit_id && (
+    Number(selectedVisit?.paid_amount || 0) > 0 ||
+    transactions.some((transaction) => transaction.visit_id === form.visit_id && isSyncedVisitIncome(transaction))
+  );
+  const hasAutoVisitRefund = form.visit_id && (
+    Number(selectedVisit?.refund || 0) > 0 ||
+    transactions.some((transaction) => transaction.visit_id === form.visit_id && isSyncedVisitRefund(transaction))
+  );
   const submit = async (event) => {
     event.preventDefault();
     if (Number(form.amount) <= 0) return alert("Введите сумму");
     if (form.type === "Долг" && !form.patient_id) return alert("Для записи долга выберите пациента");
+    if (form.type === "Доход" && form.visit_id && hasAutoVisitIncome) {
+      return alert("Оплата этого визита уже создана автоматически из поля «Оплачено» в визите. Чтобы изменить оплату, откройте сам визит и измените поле «Оплачено», либо создайте доход без привязки к визиту.");
+    }
+    if (form.type === "Возврат" && form.visit_id && hasAutoVisitRefund) {
+      return alert("Возврат этого визита уже создан автоматически из поля «Возврат» в визите. Чтобы изменить возврат, откройте сам визит и измените поле «Возврат», либо создайте возврат без привязки к визиту.");
+    }
     setBusy(true);
     try { await saveTransaction(clinicId, { ...form, amount: Number(form.amount), patient_id: form.patient_id || null, visit_id: form.visit_id || null }); await onSaved(); }
     catch (error) { alert(error.message || "Не удалось сохранить запись"); }
@@ -2843,6 +2980,9 @@ function TransactionEditor({ patients, visits, presetPatient, clinicId, onClose,
           {form.type !== "Долг" && <Field label="Способ оплаты"><select value={form.payment_method} onChange={(e) => set("payment_method", e.target.value)}>{["Наличные", "Карта", "Перевод", "Рассрочка", "Другое"].map((v) => <option key={v}>{v}</option>)}</select></Field>}
           <Field label="Пациент"><select value={form.patient_id} onChange={(e) => { set("patient_id", e.target.value); set("visit_id", ""); }}><option value="">Не выбран</option>{patients.map((p) => <option value={p.id} key={p.id}>{p.full_name}</option>)}</select></Field>
           <Field label="Визит" full><select value={form.visit_id} onChange={(e) => set("visit_id", e.target.value)}><option value="">Без привязки к визиту</option>{patientVisits.map((v) => <option value={v.id} key={v.id}>{safeDate(v.date)} · {v.visit_kind || "Визит"} · {v.treatment_type}</option>)}</select></Field>
+          {form.visit_id && ((form.type === "Доход" && hasAutoVisitIncome) || (form.type === "Возврат" && hasAutoVisitRefund)) && (
+            <div className="document-notice full"><AlertTriangle />У этого визита уже есть автоматическая финансовая операция. Изменяйте сумму внутри визита, чтобы не получить двойной учёт.</div>
+          )}
           <Field label="Комментарий" full><textarea value={form.comment} onChange={(e) => set("comment", e.target.value)} /></Field>
         </div>
         <ModalActions busy={busy} onCancel={onClose} />
@@ -2857,7 +2997,21 @@ function PhotoUploader({ patient, visits, clinicId, onClose, onSaved, presetToot
   const [visitId, setVisitId] = useState("");
   const [comment, setComment] = useState(presetTooth ? `Фото привязано к зубу ${presetTooth}` : "");
   const [busy, setBusy] = useState(false);
-  const appendFiles = (list) => setFiles((current) => [...current, ...list]);
+  const appendFiles = (list) => {
+    const accepted = [];
+    for (const file of list) {
+      if (!isAcceptedImageFile(file)) {
+        alert(`Файл «${file.name}» не похож на изображение.`);
+        continue;
+      }
+      if (file.size > MAX_PHOTO_SIZE_BYTES) {
+        alert(`Фото «${file.name}» слишком большое. Максимум ${MAX_PHOTO_SIZE_MB} МБ на одно фото.`);
+        continue;
+      }
+      accepted.push(file);
+    }
+    if (accepted.length) setFiles((current) => [...current, ...accepted]);
+  };
   const submit = async (event) => {
     event.preventDefault();
     if (!files.length) return alert("Выберите фотографии");
@@ -2881,13 +3035,13 @@ function PhotoUploader({ patient, visits, clinicId, onClose, onSaved, presetToot
           <label className="upload-zone">
             <Upload />
             <strong>Выбрать из галереи</strong>
-            <span>Можно выбрать несколько фото</span>
+            <span>JPG, PNG, WEBP, HEIC/HEIF до {MAX_PHOTO_SIZE_MB} МБ на фото</span>
             <input type="file" accept="image/*" multiple onChange={(e) => appendFiles([...e.target.files])} />
           </label>
           <label className="upload-zone">
             <Camera />
             <strong>Снять на камеру</strong>
-            <span>Откроется камера устройства</span>
+            <span>Фото будет сжато перед загрузкой</span>
             <input type="file" accept="image/*" capture="environment" onChange={(e) => appendFiles([...e.target.files])} />
           </label>
           {files.length > 0 && <div className="selected-files full"><Check />Выбрано: {files.length}</div>}

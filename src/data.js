@@ -288,14 +288,19 @@ export async function deleteTransaction(clinicId, id) {
 }
 
 async function compressImage(file) {
-  const bitmap = await createImageBitmap(file);
-  const max = 2200;
-  const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
+  try {
+    const bitmap = await createImageBitmap(file);
+    const max = 2200;
+    const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
+    return blob || file;
+  } catch {
+    return file;
+  }
 }
 
 export async function uploadPhotos(clinicId, patientId, visitId, category, files, comment = "") {
@@ -320,7 +325,7 @@ export async function uploadPhotos(clinicId, patientId, visitId, category, files
     const name = `${clinicId}/${patientId}/${crypto.randomUUID()}.jpg`;
     const { error: uploadError } = await supabase.storage
       .from("clinical-photos")
-      .upload(name, blob, { contentType: "image/jpeg", upsert: false });
+      .upload(name, blob, { contentType: blob.type || file.type || "image/jpeg", upsert: false });
     if (uploadError) throw uploadError;
     const { error } = await supabase.from("photo_records").insert({
       clinic_id: clinicId, patient_id: patientId, visit_id: visitId || null,
