@@ -11,12 +11,16 @@ import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer,
   Tooltip, XAxis, YAxis
 } from "recharts";
+import pdfMake from "pdfmake/build/pdfmake.js";
+import pdfFonts from "pdfmake/build/vfs_fonts.js";
 import { cloudEnabled, supabase } from "./supabase";
 import {
   deleteDocument, deletePatient, deletePhoto, deleteTransaction, deleteVisit, loadClinicData, resetDemo,
   savePatient, saveTransaction, saveVisit, subscribeToClinic, updatePhoto,
   uploadDocuments, uploadPhotos
 } from "./data";
+
+pdfMake.addVirtualFileSystem(pdfFonts);
 
 const money = new Intl.NumberFormat("ru-RU", {
   style: "currency", currency: "RUB", maximumFractionDigits: 0
@@ -1550,15 +1554,6 @@ const planToothRows = [
 const compactMoney = (value) => money.format(value || 0).replace(/\s?₽/, "");
 const safeFileName = (value = "document") => String(value).replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
 
-async function loadPdfMake() {
-  const [{ default: pdfMake }, { default: pdfFonts }] = await Promise.all([
-    import("pdfmake/build/pdfmake.js"),
-    import("pdfmake/build/vfs_fonts.js")
-  ]);
-  pdfMake.addVirtualFileSystem(pdfFonts);
-  return pdfMake;
-}
-
 function activeTreatmentPlan(plan) {
   return plan.filter((item) => item.status !== "Отменено");
 }
@@ -1745,7 +1740,6 @@ async function downloadPatientDocument(type, patient, clinic, plan, latestVisit)
     return printPatientDocument(type, patient, clinic, plan, latestVisit);
   }
   const fileName = safeFileName(`План лечения - ${patient.full_name || "пациент"}`) || "План лечения";
-  const pdfMake = await loadPdfMake();
   pdfMake.createPdf(treatmentPlanPdfDefinition(patient, clinic, plan)).download(`${fileName}.pdf`);
   return true;
 }
