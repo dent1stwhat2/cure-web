@@ -106,6 +106,11 @@ const diaryTemplates = [
 const isIncome = (t) => t.type === "Доход" || t.type === "Коррекция";
 const isExpense = (t) => t.type === "Расход" || t.type === "Возврат";
 const isDebt = (t) => t.type === "Долг";
+const isDiscount = (t) => t.type === "Скидка";
+const isSyncedVisitIncome = (t) => t.type === "Доход" && t.visit_id && t.comment === "Оплата визита";
+const isSyncedVisitRefund = (t) => t.type === "Возврат" && t.visit_id && t.comment === "Возврат по визиту";
+const isManualIncome = (t) => isIncome(t) && !isSyncedVisitIncome(t);
+const isManualRefund = (t) => t.type === "Возврат" && !isSyncedVisitRefund(t);
 
 export default function App() {
   const [session, setSession] = useState(cloudEnabled ? null : { user: { email: "demo@cure.app", id: "demo" } });
@@ -1023,7 +1028,7 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
         <RecommendationsSection patient={patient} clinic={data.clinic} visits={visits} clinicId={clinicId} refresh={refresh} notify={notify} />
       )}
       {section === "Лечение" && (
-        <VisitsSection visits={visits} onAdd={() => setVisitEditor({})} onEdit={setVisitEditor} />
+        <VisitsSection visits={visits} transactions={data.transactions} onAdd={() => setVisitEditor({})} onEdit={setVisitEditor} />
       )}
       {section === "Финансы" && (
         <PatientFinance patient={patient} data={data} finance={finance} onAdd={() => setTxEditor(true)} />
@@ -2198,17 +2203,17 @@ function Anamnesis({ patient }) {
   );
 }
 
-function VisitsSection({ visits, onAdd, onEdit }) {
+function VisitsSection({ visits, transactions = [], onAdd, onEdit }) {
   return (
     <div className="section-block">
       <div className="section-heading"><div><h2>Визиты</h2><p>{visits.length} записей</p></div><button className="primary" onClick={onAdd}><Plus />Добавить</button></div>
       {visits.length ? <div className="visits-list">{visits.map((visit) => {
-        const debt = Math.max(0, Number(visit.total_cost) - Number(visit.discount || 0) - Number(visit.paid_amount) + Number(visit.refund || 0));
+        const visitFinance = visitFinancials(visit, transactions);
         return (
           <button className="visit-card" key={visit.id} onClick={() => onEdit(visit)}>
             <div className="visit-top"><div><h3>{visit.treatment_type}</h3><p>{safeDate(visit.date)} · {visit.visit_kind || "Визит"} · {visit.teeth || "Область не указана"}</p></div><strong>{money.format(visit.total_cost || 0)}</strong></div>
             <p>{visit.diagnosis || visit.procedure_description || "Описание не заполнено"}</p>
-            <div className="finance-line"><span className="positive">Оплачено {money.format(visit.paid_amount || 0)}</span><span className={debt ? "negative" : "positive"}>Долг {money.format(debt)}</span></div>
+            <div className="finance-line"><span className="positive">Оплачено {money.format(visitFinance.paid)}</span><span className={visitFinance.debt ? "negative" : "positive"}>Долг {money.format(visitFinance.debt)}</span></div>
           </button>
         );
       })}</div> : <Empty icon={<CalendarDays />} title="Визитов пока нет" text="Добавьте первый визит и стоимость лечения." action={onAdd} />}
@@ -2227,6 +2232,7 @@ function PatientFinance({ patient, data, finance, onAdd }) {
         <Metric title="Чистая выручка" value={money.format(finance.net)} icon={<WalletCards />} />
         <Metric title="Задолженность" value={money.format(finance.debt)} tone="red" icon={<CircleDollarSign />} />
         {finance.manualDebt > 0 && <Metric title="Добавлено вручную" value={money.format(finance.manualDebt)} tone="red" icon={<CircleDollarSign />} />}
+        {finance.discounts > 0 && <Metric title="Скидки" value={money.format(finance.discounts)} tone="orange" icon={<ArrowUpRight />} />}
       </div>
       <div className="section-heading"><div><h2>Операции пациента</h2></div><button className="primary" onClick={onAdd}><Plus />Добавить</button></div>
       <TransactionsList transactions={transactions} />
@@ -2806,17 +2812,33 @@ function fileExtension(name = "") {
   return extension.slice(0, 5).toUpperCase();
 }
 
+function visitFinancials(visit, transactions = []) {
+  const related = transactions.filter((t) => t.visit_id === visit.id);
+  const total = Number(visit.total_cost || 0);
+  const paid = Number(visit.paid_amount || 0) + sum(related.filter(isManualIncome), (t) => t.amount);
+  const refund = Number(visit.refund || 0) + sum(related.filter(isManualRefund), (t) => t.amount);
+  const discount = Number(visit.discount || 0) + sum(related.filter(isDiscount), (t) => t.amount);
+  return {
+    total,
+    paid,
+    refund,
+    discount,
+    debt: Math.max(0, total - discount - paid + refund)
+  };
+}
+
 function patientFinancials(patientId, data) {
   const visits = data.visits.filter((v) => v.patient_id === patientId);
   const transactions = data.transactions.filter((t) => t.patient_id === patientId);
   const cost = sum(visits, (v) => Number(v.total_cost) - Number(v.discount || 0));
   const visitPaid = sum(visits, (v) => v.paid_amount);
-  const unlinkedIncome = sum(transactions.filter((t) => isIncome(t) && !t.visit_id), (t) => t.amount);
-  const refunds = sum(visits, (v) => v.refund) + sum(transactions.filter((t) => t.type === "Возврат" && !t.visit_id), (t) => t.amount);
+  const manualIncome = sum(transactions.filter(isManualIncome), (t) => t.amount);
+  const refunds = sum(visits, (v) => v.refund) + sum(transactions.filter(isManualRefund), (t) => t.amount);
   const expenses = sum(transactions.filter((t) => t.type === "Расход"), (t) => t.amount);
   const manualDebt = sum(transactions.filter(isDebt), (t) => t.amount);
-  const paid = visitPaid + unlinkedIncome;
-  return { cost, paid, refunds, expenses, manualDebt, debt: Math.max(0, cost - paid + refunds + manualDebt), net: paid - expenses - refunds };
+  const discounts = sum(transactions.filter(isDiscount), (t) => t.amount);
+  const paid = visitPaid + manualIncome;
+  return { cost, paid, refunds, expenses, manualDebt, discounts, debt: Math.max(0, cost - paid + refunds + manualDebt - discounts), net: paid - expenses - refunds };
 }
 
 function filterTransactions(transactions, period) {
@@ -2833,6 +2855,7 @@ function filterTransactions(transactions, period) {
 function chartData(transactions) {
   const map = new Map();
   [...transactions].reverse().forEach((t) => {
+    if (!isIncome(t) && !isExpense(t)) return;
     const key = new Date(t.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
     if (!map.has(key)) map.set(key, { date: key, Доход: 0, Расход: 0 });
     map.get(key)[isIncome(t) ? "Доход" : "Расход"] += Number(t.amount);
