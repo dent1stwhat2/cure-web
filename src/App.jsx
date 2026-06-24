@@ -1391,6 +1391,13 @@ function DocumentsSection({ patient, clinic, visits, documents, clinicId, onUplo
   const documentFlags = patient.dental?.document_flags || {};
   const consentPrintedAt = documentFlags.consent_printed_at;
   const print = (type) => printPatientDocument(type, patient, clinic, plan, latest);
+  const downloadGenerated = async (type) => {
+    try {
+      await downloadPatientDocument(type, patient, clinic, plan, latest);
+    } catch (error) {
+      alert(error.message || "Не удалось сформировать PDF");
+    }
+  };
   const setConsentPrinted = async (printed) => {
     try {
       await savePatient(clinicId, {
@@ -1444,7 +1451,10 @@ function DocumentsSection({ patient, clinic, visits, documents, clinicId, onUplo
         <article className="document-card">
           <div><ClipboardList /><span><strong>План лечения</strong><small>{plan.length} этапов · {money.format(sum(plan, (item) => item.price))}</small></span></div>
           <p>Документ в виде этапов лечения, зубной схемы, цен и итоговой суммы.</p>
-          <button className="primary" onClick={() => print("plan")}><Printer />Выгрузить PDF</button>
+          <div className="document-card-actions">
+            <button className="primary" onClick={() => downloadGenerated("plan")}><Download />Скачать PDF</button>
+            <button className="secondary" onClick={() => print("plan")}><Printer />Печать</button>
+          </div>
         </article>
         <article className="document-card">
           <div><FileCheck2 /><span><strong>Рекомендации</strong><small>Для выдачи пациенту</small></span></div>
@@ -1527,13 +1537,217 @@ function treatmentUnitPrice(item) {
   return Math.round(Number(item.price || 0) / quantity);
 }
 
+const planToothRows = [
+  ["18", "17", "16", "15", "14", "13", "12", "11", "21", "22", "23", "24", "25", "26", "27", "28"],
+  ["48", "47", "46", "45", "44", "43", "42", "41", "31", "32", "33", "34", "35", "36", "37", "38"]
+];
+
+const compactMoney = (value) => money.format(value || 0).replace(/\s?₽/, "");
+const safeFileName = (value = "document") => String(value).replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
+
+async function loadPdfMake() {
+  const [{ default: pdfMake }, { default: pdfFonts }] = await Promise.all([
+    import("pdfmake/build/pdfmake.js"),
+    import("pdfmake/build/vfs_fonts.js")
+  ]);
+  pdfMake.addVirtualFileSystem(pdfFonts);
+  return pdfMake;
+}
+
+function activeTreatmentPlan(plan) {
+  return plan.filter((item) => item.status !== "Отменено");
+}
+
+function planToothSet(plan) {
+  return new Set(plan.flatMap((item) => extractPlanTeeth(`${item.teeth || ""} ${item.notes || ""}`)));
+}
+
+function renderPdfToothSchemeSvg(plan) {
+  const selected = planToothSet(plan);
+  const toothWidth = 34;
+  const step = 45;
+  const startX = 18;
+  const rowStartY = [16, 86];
+  const width = 760;
+  const height = 154;
+  const teeth = planToothRows.map((row, rowIndex) => row.map((number, index) => {
+    const x = startX + index * step;
+    const y = rowStartY[rowIndex];
+    const active = selected.has(number);
+    const border = active ? "#D84F45" : "#1F2933";
+    const marker = active
+      ? `<ellipse cx="${x + 17}" cy="${y + 40}" rx="11" ry="8" fill="#E86B5D" opacity="0.88"/>
+         <path d="M${x + 6} ${y + 61}H${x + 28}" stroke="#E86B5D" stroke-width="4" stroke-linecap="round"/>`
+      : "";
+    return `
+      <g>
+        <text x="${x + 17}" y="${y}" text-anchor="middle" font-family="Roboto, Arial" font-size="13" font-weight="700" fill="#111827">${number}</text>
+        <path d="M${x + 17} ${y + 9}
+          C${x + 7} ${y + 9} ${x + 4} ${y + 20} ${x + 7} ${y + 32}
+          C${x + 9} ${y + 43} ${x + 11} ${y + 58} ${x + 17} ${y + 62}
+          C${x + 23} ${y + 58} ${x + 25} ${y + 43} ${x + 27} ${y + 32}
+          C${x + 30} ${y + 20} ${x + 27} ${y + 9} ${x + 17} ${y + 9}Z"
+          fill="#FFFFFF" stroke="${border}" stroke-width="${active ? 2.8 : 2}" />
+        ${marker}
+      </g>`;
+  }).join("")).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+    <rect width="${width}" height="${height}" rx="18" fill="#FBFAF7"/>
+    ${teeth}
+  </svg>`;
+}
+
+function treatmentPlanPdfDefinition(patient, clinic, plan) {
+  const activePlan = activeTreatmentPlan(plan);
+  const total = sum(activePlan, (item) => item.price);
+  const patientName = patient.full_name || "Пациент";
+  const birthDate = patient.birth_date ? safeDate(patient.birth_date) : "не указана";
+  const generated = new Date().toLocaleDateString("ru-RU");
+  const clinicName = clinic?.name || "CURE CLINIC";
+  const selectedTeeth = [...planToothSet(activePlan)].sort((a, b) => Number(a) - Number(b));
+  const stages = activePlan.length ? activePlan.flatMap((item, index) => {
+    const quantity = treatmentQuantity(item);
+    const unitPrice = treatmentUnitPrice(item);
+    const teeth = extractPlanTeeth(item.teeth).join(", ") || item.teeth || "—";
+    const serviceText = [
+      item.name,
+      teeth !== "—" ? `Зуб / область: ${teeth}` : "",
+      item.notes || ""
+    ].filter(Boolean).join("\n");
+    return [
+      {
+        columns: [
+          { text: `${index + 1} Этап`, style: "stageTitle" },
+          { text: compactMoney(item.price || 0), style: "stageTotal" }
+        ],
+        margin: [0, index ? 12 : 0, 0, 4]
+      },
+      {
+        table: {
+          widths: [24, "*", 74, 44, 74],
+          body: [
+            [
+              { text: "№", style: "tableHead" },
+              { text: "Услуга", style: "tableHead" },
+              { text: "Цена за ед.", style: "tableHead", alignment: "right" },
+              { text: "Кол-во", style: "tableHead", alignment: "right" },
+              { text: "Всего", style: "tableHead", alignment: "right" }
+            ],
+            [
+              { text: "1", style: "cell" },
+              { text: serviceText, style: "serviceCell" },
+              { text: compactMoney(unitPrice), style: "cell", alignment: "right" },
+              { text: String(quantity), style: "cell", alignment: "right" },
+              { text: compactMoney(item.price || 0), style: "cell", alignment: "right" }
+            ]
+          ]
+        },
+        layout: {
+          hLineWidth: (line) => line === 1 ? 0.6 : 0,
+          vLineWidth: () => 0,
+          hLineColor: () => "#DED7C7",
+          paddingLeft: () => 0,
+          paddingRight: () => 6,
+          paddingTop: () => 3,
+          paddingBottom: () => 3
+        }
+      }
+    ];
+  }) : [{ text: "План лечения пока не заполнен.", margin: [0, 12, 0, 0] }];
+
+  return {
+    pageSize: "A4",
+    pageMargins: [36, 30, 36, 30],
+    defaultStyle: { font: "Roboto", fontSize: 10.2, lineHeight: 1.22, color: "#171717" },
+    content: [
+      {
+        columns: [
+          { stack: [{ text: "CURE", style: "brand" }, { text: "CLINIC", style: "brandSub" }], width: 120 },
+          { text: clinicName, alignment: "right", color: "#6F6A5D", margin: [0, 8, 0, 0] }
+        ],
+        margin: [0, 0, 0, 12]
+      },
+      { canvas: [{ type: "line", x1: 0, y1: 0, x2: 523, y2: 0, lineWidth: 0.8, lineColor: "#D8CFBA" }], margin: [0, 0, 0, 12] },
+      {
+        table: {
+          widths: ["*"],
+          body: [[
+            {
+              text: [
+                { text: "Пациент: ", bold: true }, `${patientName}\n`,
+                { text: "Дата рождения: ", bold: true }, `${birthDate}\n`,
+                { text: "Дата документа: ", bold: true }, generated
+              ],
+              margin: [9, 7, 9, 7]
+            }
+          ]]
+        },
+        layout: {
+          fillColor: () => "#FBFAF7",
+          hLineColor: () => "#E4DDCF",
+          vLineColor: () => "#E4DDCF",
+          hLineWidth: () => 0.8,
+          vLineWidth: () => 0.8
+        },
+        margin: [0, 0, 0, 14]
+      },
+      { text: "План лечения", style: "title" },
+      { text: `Диагноз: ${patient.dental?.diagnosis || "не указан"}`, margin: [0, 0, 0, 8] },
+      { text: "Представляем вашему вниманию план лечения ваших зубов:", style: "intro" },
+      { svg: renderPdfToothSchemeSvg(activePlan), width: 510, alignment: "center", margin: [0, 4, 0, 4] },
+      {
+        columns: [
+          { canvas: [{ type: "ellipse", x: 7, y: 7, r1: 6, r2: 6, color: "#E86B5D" }], width: 18 },
+          { text: selectedTeeth.length ? `Отмечены зубы из плана лечения: ${selectedTeeth.join(", ")}` : "Зубы в плане пока не указаны.", color: "#5F5A50" }
+        ],
+        columnGap: 5,
+        margin: [0, 0, 0, 12]
+      },
+      ...stages,
+      {
+        columns: [
+          { text: "ИТОГО ПО ПРАЙСУ:", style: "grandTotalLabel" },
+          { text: money.format(total), style: "grandTotalValue" }
+        ],
+        margin: [0, 16, 0, 0]
+      },
+      {
+        columns: [
+          { text: "Врач ____________________", fontSize: 9 },
+          { text: "Пациент ____________________", fontSize: 9, alignment: "right" }
+        ],
+        margin: [0, 30, 0, 0]
+      }
+    ],
+    styles: {
+      brand: { fontSize: 26, color: "#A88C45", characterSpacing: 4, bold: true },
+      brandSub: { fontSize: 7, color: "#A88C45", characterSpacing: 3, margin: [18, -4, 0, 0] },
+      title: { fontSize: 24, bold: true, margin: [0, 0, 0, 7] },
+      intro: { fontSize: 11, bold: true, margin: [0, 0, 0, 6] },
+      stageTitle: { fontSize: 14, bold: true },
+      stageTotal: { fontSize: 14, bold: true, alignment: "right" },
+      tableHead: { fontSize: 8.5, bold: true, color: "#111111" },
+      cell: { fontSize: 9.5 },
+      serviceCell: { fontSize: 9.5, bold: true },
+      grandTotalLabel: { fontSize: 15, bold: true },
+      grandTotalValue: { fontSize: 15, bold: true, alignment: "right" }
+    }
+  };
+}
+
+async function downloadPatientDocument(type, patient, clinic, plan, latestVisit) {
+  if (type !== "plan") {
+    return printPatientDocument(type, patient, clinic, plan, latestVisit);
+  }
+  const fileName = safeFileName(`План лечения - ${patient.full_name || "пациент"}`) || "План лечения";
+  const pdfMake = await loadPdfMake();
+  pdfMake.createPdf(treatmentPlanPdfDefinition(patient, clinic, plan)).download(`${fileName}.pdf`);
+  return true;
+}
+
 function renderPlanToothScheme(plan) {
-  const selected = new Set(plan.flatMap((item) => extractPlanTeeth(`${item.teeth || ""} ${item.notes || ""}`)));
-  const rows = [
-    ["18", "17", "16", "15", "14", "13", "12", "11", "21", "22", "23", "24", "25", "26", "27", "28"],
-    ["48", "47", "46", "45", "44", "43", "42", "41", "31", "32", "33", "34", "35", "36", "37", "38"]
-  ];
-  return `<div class="pdf-tooth-chart">${rows.map((row) => `
+  const selected = planToothSet(plan);
+  return `<div class="pdf-tooth-chart">${planToothRows.map((row) => `
     <div class="pdf-teeth-row">
       ${row.map((number) => `<span class="pdf-tooth ${selected.has(number) ? "selected" : ""}"><i>${number}</i><b></b></span>`).join("")}
     </div>
@@ -1541,7 +1755,7 @@ function renderPlanToothScheme(plan) {
 }
 
 function renderTreatmentPlanPdf(patient, plan) {
-  const activePlan = plan.filter((item) => item.status !== "Отменено");
+  const activePlan = activeTreatmentPlan(plan);
   const total = sum(activePlan, (item) => item.price);
   const stages = activePlan.length ? activePlan.map((item, index) => {
     const quantity = treatmentQuantity(item);
@@ -1550,16 +1764,16 @@ function renderTreatmentPlanPdf(patient, plan) {
     const note = item.notes ? `<em>${escapeHtml(item.notes)}</em>` : "";
     return `
       <section class="plan-stage">
-        <div class="stage-title"><h2>${index + 1} Этап</h2><strong>${money.format(item.price || 0).replace(/\s?₽/, "")}</strong></div>
+        <div class="stage-title"><h2>${index + 1} Этап</h2><strong>${compactMoney(item.price || 0)}</strong></div>
         <table class="plan-stage-table">
           <thead><tr><th>№</th><th>Услуга</th><th>Цена за ед.</th><th>Кол-во</th><th>Всего</th></tr></thead>
           <tbody>
             <tr>
               <td>1</td>
               <td><b>${escapeHtml(item.name)}</b>${teeth}${note}</td>
-              <td>${money.format(unitPrice).replace(/\s?₽/, "")}</td>
+              <td>${compactMoney(unitPrice)}</td>
               <td>${quantity}</td>
-              <td>${money.format(item.price || 0).replace(/\s?₽/, "")}</td>
+              <td>${compactMoney(item.price || 0)}</td>
             </tr>
           </tbody>
         </table>
@@ -1639,13 +1853,13 @@ function printPatientDocument(type, patient, clinic, plan, latestVisit) {
       .plan-document>h1{margin:10px 0 18px;font:700 18px/1.35 Arial,sans-serif;text-align:left}.pdf-tooth-chart{margin:14px auto 34px;max-width:650px}
       .pdf-teeth-row{display:flex;justify-content:center;gap:7px;margin:9px 0}.pdf-tooth{position:relative;width:30px;text-align:center;color:#111;font-size:11px;font-weight:700}.pdf-tooth i{display:block;font-style:normal;margin-bottom:3px}
       .pdf-tooth b{display:block;height:45px;border:2px solid #202020;border-radius:48% 48% 42% 42% / 35% 35% 65% 65%;background:white}.pdf-teeth-row:nth-child(2) .pdf-tooth b{border-radius:42% 42% 48% 48% / 65% 65% 35% 35%}
-      .pdf-tooth.selected::after{content:"";position:absolute;left:8px;right:8px;bottom:8px;height:12px;border-radius:99px;background:#42db66;box-shadow:0 0 0 2px rgba(66,219,102,.22)}.pdf-tooth.selected:nth-child(3n)::after{height:17px;bottom:12px}.pdf-tooth.selected:nth-child(4n)::after{left:5px;right:5px}
+      .pdf-tooth.selected b{border-color:#d84f45}.pdf-tooth.selected::after{content:"";position:absolute;left:8px;right:8px;bottom:8px;height:12px;border-radius:99px;background:#e86b5d;box-shadow:0 0 0 2px rgba(232,107,93,.18)}.pdf-tooth.selected:nth-child(3n)::after{height:17px;bottom:12px}.pdf-tooth.selected:nth-child(4n)::after{left:5px;right:5px}
       .plan-stages{display:grid;grid-template-columns:1fr;gap:20px}.plan-stage{break-inside:avoid;page-break-inside:avoid}.stage-title{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:8px}.stage-title h2{margin:0;font:700 21px Arial,sans-serif}.stage-title strong{font:700 21px Arial,sans-serif}
       .plan-stage-table{margin:0}.plan-stage-table th{padding:4px 7px;color:#111;font:700 12px Arial,sans-serif;text-transform:none}.plan-stage-table td{vertical-align:top;padding:4px 7px;border:0;font-size:13px}.plan-stage-table td:nth-child(3),.plan-stage-table td:nth-child(4),.plan-stage-table td:nth-child(5){text-align:right;white-space:nowrap}.plan-stage-table small{color:#111}.plan-stage-table em{display:block;margin-top:3px;color:#555;font-style:normal}
       .plan-grand-total{margin-top:28px;padding-top:8px;border-top:0;font:800 20px Arial,sans-serif}.signatures.compact{margin-top:34px}.signatures.compact span{font-size:12px}
       @media(max-width:700px){.pdf-page{padding:12px}.pdf-toolbar{padding:10px}.pdf-toolbar strong{font-size:13px}.pdf-tooth{width:22px;font-size:9px}.pdf-tooth b{height:34px}.pdf-teeth-row{gap:4px}.stage-title h2,.stage-title strong{font-size:17px}.plan-stage-table th,.plan-stage-table td{font-size:10px;padding:3px 4px}}
       @media print{body{background:white}.pdf-toolbar{display:none}.pdf-page{width:auto;min-height:auto;margin:0;padding:0}button{display:none}}
-    </style></head><body><div class="pdf-toolbar"><button onclick="window.close();setTimeout(()=>{if(!window.closed)history.back()},80)">← Закрыть</button><div><strong>${document.title}</strong><br><span>${patientName}</span></div><button onclick="window.print()">Печать / PDF</button></div><main class="pdf-page">${document.body}</main><script>setTimeout(()=>window.print(),350)<\/script></body></html>`);
+    </style></head><body><div class="pdf-toolbar"><button onclick="window.close();setTimeout(()=>{if(!window.closed)history.back()},80)">← Закрыть</button><div><strong>${document.title}</strong><br><span>${patientName}</span></div><button onclick="window.print()">Печать</button></div><main class="pdf-page">${document.body}</main></body></html>`);
   popup.document.close();
   return true;
 }
