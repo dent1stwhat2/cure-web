@@ -1013,6 +1013,7 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
           clinic={data.clinic}
           visits={visits}
           documents={documents}
+          clinicId={clinicId}
           onUpload={() => setDocumentUploader(true)}
           refresh={refresh}
           notify={notify}
@@ -1383,10 +1384,35 @@ function RecommendationsSection({ patient, clinic, visits, clinicId, refresh, no
   );
 }
 
-function DocumentsSection({ patient, clinic, visits, documents, onUpload, refresh, notify }) {
+function DocumentsSection({ patient, clinic, visits, documents, clinicId, onUpload, refresh, notify }) {
   const plan = treatmentItems(patient);
   const latest = visits[0];
+  const [previewDocument, setPreviewDocument] = useState(null);
+  const documentFlags = patient.dental?.document_flags || {};
+  const consentPrintedAt = documentFlags.consent_printed_at;
   const print = (type) => printPatientDocument(type, patient, clinic, plan, latest);
+  const setConsentPrinted = async (printed) => {
+    try {
+      await savePatient(clinicId, {
+        ...patient,
+        dental: {
+          ...(patient.dental || {}),
+          document_flags: {
+            ...documentFlags,
+            consent_printed_at: printed ? new Date().toISOString() : ""
+          }
+        }
+      });
+      await refresh();
+      notify(printed ? "Согласие отмечено как распечатанное" : "Отметка согласия снята");
+    } catch (error) {
+      alert(error.message || "Не удалось обновить статус согласия");
+    }
+  };
+  const printConsent = async () => {
+    const opened = print("consent");
+    if (opened !== false && !consentPrintedAt) await setConsentPrinted(true);
+  };
   const remove = async (document) => {
     if (!confirm(`Удалить файл «${document.file_name}»?`)) return;
     await deleteDocument(document);
@@ -1417,8 +1443,8 @@ function DocumentsSection({ patient, clinic, visits, documents, onUpload, refres
       <div className="documents-grid">
         <article className="document-card">
           <div><ClipboardList /><span><strong>План лечения</strong><small>{plan.length} этапов · {money.format(sum(plan, (item) => item.price))}</small></span></div>
-          <p>Процедуры, зубы, статусы, цены и итоговая стоимость.</p>
-          <button className="primary" onClick={() => print("plan")}><Printer />Печать / PDF</button>
+          <p>Документ в виде этапов лечения, зубной схемы, цен и итоговой суммы.</p>
+          <button className="primary" onClick={() => print("plan")}><Printer />Выгрузить PDF</button>
         </article>
         <article className="document-card">
           <div><FileCheck2 /><span><strong>Рекомендации</strong><small>Для выдачи пациенту</small></span></div>
@@ -1426,10 +1452,19 @@ function DocumentsSection({ patient, clinic, visits, documents, onUpload, refres
           <button className="primary" onClick={() => print("recommendations")}><Printer />Печать / PDF</button>
         </article>
         <article className="document-card">
-          <div><ShieldCheck /><span><strong>Согласие пациента</strong><small>Шаблон для подписи</small></span></div>
+          <div><ShieldCheck /><span><strong>Согласие пациента</strong><small>{consentPrintedAt ? `Распечатано ${safeDate(consentPrintedAt)}` : "Шаблон для подписи"}</small></span></div>
           <p>Информированное согласие с местами для даты и подписей.</p>
-          <button className="primary" onClick={() => print("consent")}><Printer />Печать / PDF</button>
+          <div className="document-card-actions">
+            <button className="primary" onClick={printConsent}><Printer />Печать / PDF</button>
+            <button className="secondary" onClick={() => setConsentPrinted(!consentPrintedAt)}>
+              <Check />{consentPrintedAt ? "Снять отметку" : "Отметить"}
+            </button>
+          </div>
         </article>
+      </div>
+      <div className={`document-status-note ${consentPrintedAt ? "ready" : ""}`}>
+        <ShieldCheck />
+        <span>{consentPrintedAt ? `Согласие пациента уже печаталось: ${safeDate(consentPrintedAt)}.` : "Согласие пациента ещё не отмечено как распечатанное."}</span>
       </div>
       <div className="document-notice"><AlertTriangle />Текст согласия является базовым шаблоном. Перед использованием проверьте его с юристом по требованиям вашей страны.</div>
       <div className="section-heading uploaded-documents-heading"><div><h2>Загруженные файлы</h2><p>{documents.length} файлов</p></div></div>
@@ -1444,7 +1479,7 @@ function DocumentsSection({ patient, clinic, visits, documents, onUpload, refres
                 {document.comment && <p>{document.comment}</p>}
               </div>
               <div className="document-actions">
-                <a className="secondary" href={document.signed_url} target="_blank" rel="noreferrer"><FileText />Открыть</a>
+                <button className="secondary" onClick={() => setPreviewDocument(document)}><FileText />Открыть</button>
                 <button className="secondary" onClick={() => download(document)}><Download />Скачать</button>
               </div>
               <button className="icon-button mini danger-ghost" onClick={() => remove(document)}><Trash2 /></button>
@@ -1452,13 +1487,103 @@ function DocumentsSection({ patient, clinic, visits, documents, onUpload, refres
           ))}
         </div>
       ) : <Empty icon={<FileText />} title="Своих файлов пока нет" text="Добавьте согласие, PDF, Word, Excel, презентацию, снимок или другой документ пациента." action={onUpload} />}
+      {previewDocument && <DocumentPreview document={previewDocument} onClose={() => setPreviewDocument(null)} onDownload={() => download(previewDocument)} />}
     </div>
   );
 }
 
+function DocumentPreview({ document, onClose, onDownload }) {
+  return (
+    <div className="document-preview-backdrop">
+      <section className="document-preview-panel">
+        <header>
+          <button className="secondary" onClick={onClose}><ChevronLeft />Закрыть</button>
+          <div>
+            <strong>{document.file_name}</strong>
+            <span>{document.category} · {formatFileSize(document.file_size)}</span>
+          </div>
+          <button className="secondary" onClick={onDownload}><Download />Скачать</button>
+        </header>
+        <iframe title={document.file_name} src={document.signed_url} />
+        <footer>
+          <span>Если формат не отображается в предпросмотре, скачайте файл или откройте его в отдельном приложении.</span>
+          <a className="secondary" href={document.signed_url} target="_blank" rel="noreferrer">Открыть отдельно</a>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function extractPlanTeeth(value = "") {
+  return [...String(value).matchAll(/\b(?:1[1-8]|2[1-8]|3[1-8]|4[1-8])\b/g)].map((match) => match[0]);
+}
+
+function treatmentQuantity(item) {
+  return Math.max(1, extractPlanTeeth(item.teeth).length || Number(item.quantity || 1));
+}
+
+function treatmentUnitPrice(item) {
+  const quantity = treatmentQuantity(item);
+  return Math.round(Number(item.price || 0) / quantity);
+}
+
+function renderPlanToothScheme(plan) {
+  const selected = new Set(plan.flatMap((item) => extractPlanTeeth(`${item.teeth || ""} ${item.notes || ""}`)));
+  const rows = [
+    ["18", "17", "16", "15", "14", "13", "12", "11", "21", "22", "23", "24", "25", "26", "27", "28"],
+    ["48", "47", "46", "45", "44", "43", "42", "41", "31", "32", "33", "34", "35", "36", "37", "38"]
+  ];
+  return `<div class="pdf-tooth-chart">${rows.map((row) => `
+    <div class="pdf-teeth-row">
+      ${row.map((number) => `<span class="pdf-tooth ${selected.has(number) ? "selected" : ""}"><i>${number}</i><b></b></span>`).join("")}
+    </div>
+  `).join("")}</div>`;
+}
+
+function renderTreatmentPlanPdf(patient, plan) {
+  const activePlan = plan.filter((item) => item.status !== "Отменено");
+  const total = sum(activePlan, (item) => item.price);
+  const stages = activePlan.length ? activePlan.map((item, index) => {
+    const quantity = treatmentQuantity(item);
+    const unitPrice = treatmentUnitPrice(item);
+    const teeth = item.teeth ? `<br><small>${escapeHtml(item.teeth)}</small>` : "";
+    const note = item.notes ? `<em>${escapeHtml(item.notes)}</em>` : "";
+    return `
+      <section class="plan-stage">
+        <div class="stage-title"><h2>${index + 1} Этап</h2><strong>${money.format(item.price || 0).replace(/\s?₽/, "")}</strong></div>
+        <table class="plan-stage-table">
+          <thead><tr><th>№</th><th>Услуга</th><th>Цена за ед.</th><th>Кол-во</th><th>Всего</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><b>${escapeHtml(item.name)}</b>${teeth}${note}</td>
+              <td>${money.format(unitPrice).replace(/\s?₽/, "")}</td>
+              <td>${quantity}</td>
+              <td>${money.format(item.price || 0).replace(/\s?₽/, "")}</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    `;
+  }).join("") : `<section class="plan-stage"><p>План лечения пока не заполнен.</p></section>`;
+
+  return `
+    <div class="plan-document">
+      <h1>Представляем Вашему вниманию план лечения ваших зубов:</h1>
+      ${renderPlanToothScheme(activePlan)}
+      <div class="plan-stages">${stages}</div>
+      <div class="plan-grand-total">ИТОГО ПО ПРАЙСУ: <b>${money.format(total)}</b></div>
+      <div class="signatures compact"><span>Врач ____________________</span><span>Пациент ____________________</span></div>
+    </div>
+  `;
+}
+
 function printPatientDocument(type, patient, clinic, plan, latestVisit) {
   const popup = window.open("", "_blank", "width=900,height=1100");
-  if (!popup) return alert("Разрешите всплывающие окна, чтобы открыть документ");
+  if (!popup) {
+    alert("Разрешите всплывающие окна, чтобы открыть документ");
+    return false;
+  }
   const clinicName = escapeHtml(clinic?.name || "CURE CLINIC");
   const patientName = escapeHtml(patient.full_name);
   const birthDate = patient.birth_date ? safeDate(patient.birth_date) : "не указана";
@@ -1467,18 +1592,13 @@ function printPatientDocument(type, patient, clinic, plan, latestVisit) {
     <header><div class="brand">CURE <small>CLINIC</small></div><div>${clinicName}</div></header>
     <div class="patient"><b>Пациент:</b> ${patientName}<br><b>Дата рождения:</b> ${birthDate}<br><b>Дата документа:</b> ${generated}</div>
   `;
-  const planRows = plan.length ? plan.map((item, index) => `
-    <tr><td>${index + 1}</td><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.teeth || "—")}</td><td>${escapeHtml(item.status || "Запланировано")}</td><td>${money.format(item.price || 0)}</td></tr>
-  `).join("") : `<tr><td colspan="5">План лечения пока не заполнен.</td></tr>`;
   const documents = {
     plan: {
       title: "План лечения",
       body: `${sharedHeader}
-        <h1>План лечения</h1>
+        <h1 class="document-main-title">План лечения</h1>
         <p><b>Диагноз:</b> ${escapeHtml(patient.dental?.diagnosis || "не указан")}</p>
-        <table><thead><tr><th>№</th><th>Этап лечения</th><th>Зуб / область</th><th>Статус</th><th>Стоимость</th></tr></thead><tbody>${planRows}</tbody></table>
-        <div class="total"><span>Итоговая стоимость</span><b>${money.format(sum(plan.filter((item) => item.status !== "Отменено"), (item) => item.price))}</b></div>
-        <div class="signatures"><span>Врач ____________________</span><span>Пациент ____________________</span></div>`
+        ${renderTreatmentPlanPdf(patient, plan)}`
     },
     recommendations: {
       title: "Рекомендации",
@@ -1502,19 +1622,32 @@ function printPatientDocument(type, patient, clinic, plan, latestVisit) {
     }
   };
   const document = documents[type];
-  popup.document.write(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${document.title} — ${patientName}</title>
+  popup.document.write(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${document.title} — ${patientName}</title>
     <style>
-      @page{size:A4;margin:18mm}*{box-sizing:border-box}body{margin:0;color:#1c1c1e;font:14px/1.55 Arial,sans-serif}
-      header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:18px;border-bottom:1px solid #d9d4c8;color:#6e6e73}
+      @page{size:A4;margin:14mm}*{box-sizing:border-box}body{margin:0;color:#1c1c1e;background:#111;font:14px/1.55 Arial,sans-serif}
+      .pdf-toolbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;color:#fff;background:#000}
+      .pdf-toolbar button{min-height:38px;padding:8px 12px;color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:12px;background:transparent;font-weight:700}
+      .pdf-toolbar strong{font-size:15px}.pdf-toolbar span{color:rgba(255,255,255,.68);font-size:12px}
+      .pdf-page{width:min(920px,100%);min-height:100vh;margin:0 auto;padding:18px;background:white}
+      header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:14px;border-bottom:1px solid #d9d4c8;color:#6e6e73}
       .brand{color:#a88c45;font:28px Georgia,serif;letter-spacing:.12em}.brand small{display:block;text-align:center;font:7px Arial,sans-serif;letter-spacing:.35em}
-      .patient{margin:24px 0;padding:15px;border:1px solid #e6e1d6;border-radius:10px;background:#f8f7f3}
-      h1{margin:28px 0 20px;font:32px Georgia,serif}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{padding:10px;border-bottom:1px solid #e6e1d6;text-align:left}th{color:#6e6e73;font-size:11px;text-transform:uppercase}
+      .patient{margin:18px 0;padding:13px;border:1px solid #e6e1d6;border-radius:10px;background:#f8f7f3}
+      h1{margin:22px 0 16px;font:30px Georgia,serif}.document-main-title{margin-bottom:10px}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{padding:10px;border-bottom:1px solid #e6e1d6;text-align:left}th{color:#6e6e73;font-size:11px;text-transform:uppercase}
       td:last-child,th:last-child{text-align:right}.total{display:flex;justify-content:space-between;padding:18px 10px;border-top:2px solid #a88c45;font-size:17px}
       .text{min-height:260px;padding:20px;border:1px solid #e6e1d6;border-radius:10px;white-space:normal}.consent{min-height:420px}
       .signatures{display:flex;flex-wrap:wrap;justify-content:space-between;gap:28px;margin-top:70px}.signatures span{min-width:210px}
-      @media print{button{display:none}}
-    </style></head><body>${document.body}<script>setTimeout(()=>window.print(),250)<\/script></body></html>`);
+      .plan-document>h1{margin:10px 0 18px;font:700 18px/1.35 Arial,sans-serif;text-align:left}.pdf-tooth-chart{margin:14px auto 34px;max-width:650px}
+      .pdf-teeth-row{display:flex;justify-content:center;gap:7px;margin:9px 0}.pdf-tooth{position:relative;width:30px;text-align:center;color:#111;font-size:11px;font-weight:700}.pdf-tooth i{display:block;font-style:normal;margin-bottom:3px}
+      .pdf-tooth b{display:block;height:45px;border:2px solid #202020;border-radius:48% 48% 42% 42% / 35% 35% 65% 65%;background:white}.pdf-teeth-row:nth-child(2) .pdf-tooth b{border-radius:42% 42% 48% 48% / 65% 65% 35% 35%}
+      .pdf-tooth.selected::after{content:"";position:absolute;left:8px;right:8px;bottom:8px;height:12px;border-radius:99px;background:#42db66;box-shadow:0 0 0 2px rgba(66,219,102,.22)}.pdf-tooth.selected:nth-child(3n)::after{height:17px;bottom:12px}.pdf-tooth.selected:nth-child(4n)::after{left:5px;right:5px}
+      .plan-stages{display:grid;grid-template-columns:1fr;gap:20px}.plan-stage{break-inside:avoid;page-break-inside:avoid}.stage-title{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:8px}.stage-title h2{margin:0;font:700 21px Arial,sans-serif}.stage-title strong{font:700 21px Arial,sans-serif}
+      .plan-stage-table{margin:0}.plan-stage-table th{padding:4px 7px;color:#111;font:700 12px Arial,sans-serif;text-transform:none}.plan-stage-table td{vertical-align:top;padding:4px 7px;border:0;font-size:13px}.plan-stage-table td:nth-child(3),.plan-stage-table td:nth-child(4),.plan-stage-table td:nth-child(5){text-align:right;white-space:nowrap}.plan-stage-table small{color:#111}.plan-stage-table em{display:block;margin-top:3px;color:#555;font-style:normal}
+      .plan-grand-total{margin-top:28px;padding-top:8px;border-top:0;font:800 20px Arial,sans-serif}.signatures.compact{margin-top:34px}.signatures.compact span{font-size:12px}
+      @media(max-width:700px){.pdf-page{padding:12px}.pdf-toolbar{padding:10px}.pdf-toolbar strong{font-size:13px}.pdf-tooth{width:22px;font-size:9px}.pdf-tooth b{height:34px}.pdf-teeth-row{gap:4px}.stage-title h2,.stage-title strong{font-size:17px}.plan-stage-table th,.plan-stage-table td{font-size:10px;padding:3px 4px}}
+      @media print{body{background:white}.pdf-toolbar{display:none}.pdf-page{width:auto;min-height:auto;margin:0;padding:0}button{display:none}}
+    </style></head><body><div class="pdf-toolbar"><button onclick="window.close();setTimeout(()=>{if(!window.closed)history.back()},80)">← Закрыть</button><div><strong>${document.title}</strong><br><span>${patientName}</span></div><button onclick="window.print()">Печать / PDF</button></div><main class="pdf-page">${document.body}</main><script>setTimeout(()=>window.print(),350)<\/script></body></html>`);
   popup.document.close();
+  return true;
 }
 
 function CommunicationSection({ patient, clinicId, refresh, notify, onEdit, onCopy }) {
