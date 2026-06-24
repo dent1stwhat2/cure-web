@@ -13,7 +13,7 @@ import {
 } from "recharts";
 import { cloudEnabled, supabase } from "./supabase";
 import {
-  deleteDocument, deletePatient, deletePhoto, deleteTransaction, loadClinicData, resetDemo,
+  deleteDocument, deletePatient, deletePhoto, deleteTransaction, deleteVisit, loadClinicData, resetDemo,
   savePatient, saveTransaction, saveVisit, subscribeToClinic, updatePhoto,
   uploadDocuments, uploadPhotos
 } from "./data";
@@ -36,6 +36,9 @@ const safeDate = (value) => value ? shortDate.format(new Date(value)) : "—";
 const sum = (items, selector) => items.reduce((total, item) => total + Number(selector(item) || 0), 0);
 const treatmentItems = (patient) => Array.isArray(patient?.dental?.treatment_items)
   ? patient.dental.treatment_items
+  : [];
+const diaryEntries = (patient) => Array.isArray(patient?.dental?.diary_entries)
+  ? patient.dental.diary_entries
   : [];
 const toothChart = (patient) => patient?.dental?.tooth_chart || {};
 const sameDay = (left, right) => {
@@ -65,6 +68,32 @@ const treatmentTemplates = [
   { name: "Удаление зуба", price: 0, notes: "Хирургический этап и послеоперационные рекомендации." },
   { name: "Имплантация", price: 0, notes: "Хирургический этап установки имплантата." },
   { name: "Ортопедический этап", price: 0, notes: "Подготовка, снятие оттисков/сканирование и фиксация конструкции." }
+];
+const diaryTemplates = [
+  {
+    type: "Выполнено",
+    title: "Выполнен клинический этап",
+    text: "Пациент осмотрен. Проведён запланированный этап лечения. Жалоб после процедуры нет/умеренные. Даны рекомендации.",
+    next_step: "Контроль динамики на следующем визите."
+  },
+  {
+    type: "План",
+    title: "План на следующий визит",
+    text: "На следующем визите планируется продолжение лечения согласно утверждённому плану.",
+    next_step: "Согласовать дату и объём следующего этапа."
+  },
+  {
+    type: "Динамика",
+    title: "Оценка динамики",
+    text: "Отмечается положительная динамика. Состояние тканей/зуба контролируется, жалобы уточнены.",
+    next_step: "Продолжить наблюдение и сравнить с предыдущими данными."
+  },
+  {
+    type: "Контроль",
+    title: "Контрольный осмотр",
+    text: "Проведён контрольный осмотр. Результат лечения стабильный/требует наблюдения.",
+    next_step: "Назначить контрольный визит при необходимости."
+  }
 ];
 const isIncome = (t) => t.type === "Доход" || t.type === "Коррекция";
 const isExpense = (t) => t.type === "Расход" || t.type === "Возврат";
@@ -482,7 +511,7 @@ function ClinicApp({ session, membership, data, refresh, notify }) {
 
       <main className="app-content">
         {route === "today" && (
-          <TodayPage data={data} openPatient={openPatient} />
+          <TodayPage data={data} clinicId={membership.clinic_id} refresh={refresh} notify={notify} openPatient={openPatient} />
         )}
         {route === "patients" && (
           <PatientsPage data={data} clinicId={membership.clinic_id} refresh={refresh} openPatient={openPatient} notify={notify} />
@@ -523,7 +552,8 @@ function ClinicApp({ session, membership, data, refresh, notify }) {
   );
 }
 
-function TodayPage({ data, openPatient }) {
+function TodayPage({ data, clinicId, refresh, notify, openPatient }) {
+  const [visitEditor, setVisitEditor] = useState(null);
   const now = new Date();
   const appointments = data.visits
     .filter((visit) => sameDay(visit.date, now))
@@ -556,14 +586,15 @@ function TodayPage({ data, openPatient }) {
             if (!patient) return null;
             const warnings = patientWarnings(patient);
             return (
-              <button className="appointment-card" key={visit.id} onClick={() => openPatient(patient.id)}>
+              <button className="appointment-card" key={visit.id} onClick={() => setVisitEditor({ visit, patient })}>
                 <span className="appointment-time">{timeLabel(visit.date)}</span>
                 <span className="appointment-main">
                   <strong>{patient.full_name}</strong>
                   <small>{visit.treatment_type} · {visit.teeth || "Область не указана"}</small>
+                  <small className="visit-edit-hint">Нажмите, чтобы изменить запись</small>
                   {warnings.length > 0 && <em><AlertTriangle />{warnings[0]}</em>}
                 </span>
-                <ChevronRight />
+                <Edit3 />
               </button>
             );
           }) : <Empty icon={<CalendarDays />} title="Сегодня приёмов нет" text="Будущие визиты появятся здесь автоматически." />}
@@ -574,7 +605,7 @@ function TodayPage({ data, openPatient }) {
             {upcoming.length ? upcoming.map((visit) => {
               const patient = data.patients.find((item) => item.id === visit.patient_id);
               return patient && (
-                <button key={visit.id} onClick={() => openPatient(patient.id)}>
+                <button key={visit.id} onClick={() => setVisitEditor({ visit, patient })}>
                   <span>{safeDate(visit.date)} · {timeLabel(visit.date)}</span>
                   <strong>{patient.full_name}</strong>
                   <small>{visit.treatment_type}</small>
@@ -584,6 +615,17 @@ function TodayPage({ data, openPatient }) {
           </div>
         </div>
       </div>
+      {visitEditor && (
+        <VisitEditor
+          patient={visitEditor.patient}
+          visit={visitEditor.visit}
+          clinicId={clinicId}
+          onClose={() => setVisitEditor(null)}
+          onOpenPatient={() => openPatient(visitEditor.patient.id)}
+          onSaved={async () => { await refresh(); setVisitEditor(null); notify("Визит сохранён"); }}
+          onDeleted={async () => { await refresh(); setVisitEditor(null); notify("Визит удалён"); }}
+        />
+      )}
     </section>
   );
 }
@@ -591,32 +633,92 @@ function TodayPage({ data, openPatient }) {
 function CalendarPage({ data, clinicId, refresh, notify, openPatient }) {
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [editorPatient, setEditorPatient] = useState(null);
-  const days = Array.from({ length: 14 }, (_, index) => {
+  const [visitEditor, setVisitEditor] = useState(null);
+  const [monthCursor, setMonthCursor] = useState(() => {
     const date = new Date();
-    date.setDate(date.getDate() + index);
+    date.setDate(1);
     return date;
   });
+  const monthStart = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1);
+  const monthEnd = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 0);
+  const leadingDays = (monthStart.getDay() + 6) % 7;
+  const calendarCells = Array.from({ length: Math.ceil((leadingDays + monthEnd.getDate()) / 7) * 7 }, (_, index) => {
+    const date = new Date(monthStart);
+    date.setDate(index - leadingDays + 1);
+    return date;
+  });
+  const monthLabel = monthCursor.toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
+  const years = Array.from({ length: 11 }, (_, index) => new Date().getFullYear() - 5 + index);
   const visits = data.visits
     .filter((visit) => sameDay(visit.date, selectedDate))
     .sort((a, b) => new Date(a.date) - new Date(b.date));
+  const monthVisits = data.visits.filter((visit) => {
+    const date = new Date(visit.date);
+    return date.getFullYear() === monthCursor.getFullYear() && date.getMonth() === monthCursor.getMonth();
+  });
+
+  const shiftMonth = (delta) => {
+    const next = new Date(monthCursor);
+    next.setMonth(next.getMonth() + delta);
+    next.setDate(1);
+    setMonthCursor(next);
+    setSelectedDate(next.toISOString().slice(0, 10));
+  };
+
+  const jumpToday = () => {
+    const today = new Date();
+    const first = new Date(today.getFullYear(), today.getMonth(), 1);
+    setMonthCursor(first);
+    setSelectedDate(todayISO());
+  };
+
+  const setMonth = (value) => {
+    const next = new Date(monthCursor);
+    next.setMonth(Number(value));
+    next.setDate(1);
+    setMonthCursor(next);
+    setSelectedDate(next.toISOString().slice(0, 10));
+  };
+
+  const setYear = (value) => {
+    const next = new Date(monthCursor);
+    next.setFullYear(Number(value));
+    next.setDate(1);
+    setMonthCursor(next);
+    setSelectedDate(next.toISOString().slice(0, 10));
+  };
 
   return (
     <section>
-      <PageHeader title="Календарь" subtitle="Ближайшие 14 дней">
+      <PageHeader title="Календарь" subtitle={`${monthLabel} · ${monthVisits.length} записей`}>
         <select className="simple-select" value={editorPatient?.id || ""} onChange={(event) => setEditorPatient(data.patients.find((p) => p.id === event.target.value) || null)}>
           <option value="">+ Назначить визит</option>
           {data.patients.map((patient) => <option value={patient.id} key={patient.id}>{patient.full_name}</option>)}
         </select>
       </PageHeader>
-      <div className="calendar-strip">
-        {days.map((date) => {
+      <div className="calendar-toolbar card">
+        <button className="secondary" onClick={() => shiftMonth(-1)}><ChevronLeft />Предыдущий</button>
+        <div className="calendar-selectors">
+          <select value={monthCursor.getMonth()} onChange={(event) => setMonth(event.target.value)}>
+            {Array.from({ length: 12 }, (_, month) => <option key={month} value={month}>{new Date(2026, month, 1).toLocaleDateString("ru-RU", { month: "long" })}</option>)}
+          </select>
+          <select value={monthCursor.getFullYear()} onChange={(event) => setYear(event.target.value)}>
+            {years.map((year) => <option key={year} value={year}>{year}</option>)}
+          </select>
+        </div>
+        <button className="secondary" onClick={jumpToday}>Сегодня</button>
+        <button className="secondary" onClick={() => shiftMonth(1)}>Следующий<ChevronRight /></button>
+      </div>
+      <div className="calendar-month card">
+        {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((day) => <span className="calendar-weekday" key={day}>{day}</span>)}
+        {calendarCells.map((date) => {
           const iso = date.toISOString().slice(0, 10);
           const count = data.visits.filter((visit) => sameDay(visit.date, date)).length;
+          const outside = date.getMonth() !== monthCursor.getMonth();
           return (
-            <button key={iso} className={selectedDate === iso ? "active" : ""} onClick={() => setSelectedDate(iso)}>
-              <small>{date.toLocaleDateString("ru-RU", { weekday: "short" })}</small>
+            <button key={iso} className={`${selectedDate === iso ? "active" : ""} ${outside ? "outside" : ""}`} onClick={() => setSelectedDate(iso)}>
               <strong>{date.getDate()}</strong>
-              <span>{count || ""}</span>
+              {count > 0 && <span>{count}</span>}
             </button>
           );
         })}
@@ -628,10 +730,10 @@ function CalendarPage({ data, clinicId, refresh, notify, openPatient }) {
         {visits.length ? visits.map((visit) => {
           const patient = data.patients.find((item) => item.id === visit.patient_id);
           return patient && (
-            <button className="appointment-card" key={visit.id} onClick={() => openPatient(patient.id)}>
+            <button className="appointment-card" key={visit.id} onClick={() => setVisitEditor({ visit, patient })}>
               <span className="appointment-time">{timeLabel(visit.date)}</span>
-              <span className="appointment-main"><strong>{patient.full_name}</strong><small>{visit.treatment_type} · {visit.visit_kind || "Визит"}</small></span>
-              <ChevronRight />
+              <span className="appointment-main"><strong>{patient.full_name}</strong><small>{visit.treatment_type} · {visit.visit_kind || "Визит"}</small><small className="visit-edit-hint">Нажмите, чтобы изменить или удалить запись</small></span>
+              <Edit3 />
             </button>
           );
         }) : <Empty icon={<CalendarDays />} title="Записей нет" text="Выберите пациента сверху, чтобы назначить визит." />}
@@ -643,6 +745,17 @@ function CalendarPage({ data, clinicId, refresh, notify, openPatient }) {
           clinicId={clinicId}
           onClose={() => setEditorPatient(null)}
           onSaved={async () => { await refresh(); setEditorPatient(null); notify("Визит назначен"); }}
+        />
+      )}
+      {visitEditor && (
+        <VisitEditor
+          patient={visitEditor.patient}
+          visit={visitEditor.visit}
+          clinicId={clinicId}
+          onClose={() => setVisitEditor(null)}
+          onOpenPatient={() => openPatient(visitEditor.patient.id)}
+          onSaved={async () => { await refresh(); setVisitEditor(null); notify("Визит сохранён"); }}
+          onDeleted={async () => { await refresh(); setVisitEditor(null); notify("Визит удалён"); }}
         />
       )}
     </section>
@@ -851,7 +964,7 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
         {whatsappUrl && <a href={whatsappUrl} target="_blank" rel="noreferrer"><MessageCircle /><span>WhatsApp</span></a>}
       </div>
       <div className="chip-scroll">
-        {["Обзор", "Связь", "Зубная формула", "История", "Рекомендации", "Документы", "Анамнез", "Лечение", "Финансы", "Фото", "Заметки"].map((item) => (
+        {["Обзор", "Связь", "Дневник", "Зубная формула", "История", "Рекомендации", "Документы", "Анамнез", "Лечение", "Финансы", "Фото", "Заметки"].map((item) => (
           <button key={item} className={section === item ? "active" : ""} onClick={() => setSection(item)}>{item}</button>
         ))}
       </div>
@@ -875,6 +988,7 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
           onCopy={copyText}
         />
       )}
+      {section === "Дневник" && <PatientDiary patient={patient} clinicId={clinicId} refresh={refresh} notify={notify} />}
       {section === "Анамнез" && <Anamnesis patient={patient} />}
       {section === "Зубная формула" && (
         <DentalChart patient={patient} onSelect={setToothEditor} />
@@ -1013,6 +1127,7 @@ function Overview({ patient, visits, finance, onAddTreatment, onEditTreatment })
         <InfoRow label="Диагноз" value={patient.dental?.diagnosis || "—"} />
         <InfoRow label="FDI" value={patient.dental?.fdi_teeth || "—"} />
         <InfoRow label="Визитов" value={visits.length} />
+        <InfoRow label="Записей дневника" value={diaryEntries(patient).length} />
         <InfoRow label="Финансовый статус" value={finance.debt > 0 ? `Долг ${money.format(finance.debt)}` : "Оплачено"} />
       </InfoCard>
     </div>
@@ -1202,6 +1317,10 @@ function PatientTimeline({ patient, data }) {
     ...treatmentItems(patient).map((item) => ({
       id: `plan-${item.id}`, date: item.updated_at || item.created_at || patient.updated_at, icon: <ClipboardList />,
       title: `План: ${item.name}`, text: `${item.status || "Запланировано"} · ${money.format(item.price || 0)}`
+    })),
+    ...diaryEntries(patient).map((entry) => ({
+      id: `diary-${entry.id}`, date: entry.date || entry.updated_at, icon: <History />,
+      title: `Дневник: ${entry.title}`, text: [entry.type, entry.teeth && `FDI ${entry.teeth}`, entry.next_step && `Дальше: ${entry.next_step}`].filter(Boolean).join(" · ") || entry.text
     }))
   ].filter((item) => item.date).sort((a, b) => new Date(b.date) - new Date(a.date));
 
@@ -1547,6 +1666,151 @@ function CommunicationSection({ patient, clinicId, refresh, notify, onEdit, onCo
   );
 }
 
+function PatientDiary({ patient, clinicId, refresh, notify }) {
+  const [editor, setEditor] = useState(null);
+  const entries = diaryEntries(patient).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+  const latest = entries[0];
+
+  return (
+    <div className="section-block diary-section">
+      <div className="section-heading">
+        <div>
+          <h2>Дневник пациента</h2>
+          <p>Динамика лечения, выполненные этапы и планы на следующие визиты.</p>
+        </div>
+        <button className="primary" onClick={() => setEditor({})}><Plus />Добавить запись</button>
+      </div>
+
+      {latest && (
+        <article className="diary-latest card">
+          <div>
+            <span>{latest.type || "Запись"} · {safeDate(latest.date)}</span>
+            <h3>{latest.title}</h3>
+            <p>{latest.text}</p>
+          </div>
+          {latest.next_step && <small>Следующий шаг: {latest.next_step}</small>}
+        </article>
+      )}
+
+      <div className="diary-template-row">
+        <span><Sparkles />Быстрые шаблоны</span>
+        <div>{diaryTemplates.map((template) => (
+          <button key={template.title} onClick={() => setEditor(template)}>{template.type}</button>
+        ))}</div>
+      </div>
+
+      {entries.length ? (
+        <div className="diary-list">
+          {entries.map((entry) => (
+            <button className="diary-card" key={entry.id} onClick={() => setEditor(entry)}>
+              <span>{safeDate(entry.date)} · {entry.type || "Запись"}</span>
+              <strong>{entry.title}</strong>
+              <p>{entry.text}</p>
+              {entry.next_step && <small>Дальше: {entry.next_step}</small>}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <Empty icon={<History />} title="Дневник пока пуст" text="Добавьте первую запись: что сделали, как меняется состояние и что планируется дальше." action={() => setEditor({})} />
+      )}
+
+      {editor && (
+        <DiaryEntryEditor
+          patient={patient}
+          entry={editor.id ? editor : null}
+          template={!editor.id ? editor : null}
+          clinicId={clinicId}
+          onClose={() => setEditor(null)}
+          onSaved={async (message) => { await refresh(); setEditor(null); notify(message); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function DiaryEntryEditor({ patient, entry, template, clinicId, onClose, onSaved }) {
+  const [form, setForm] = useState(entry ? structuredClone(entry) : {
+    date: new Date().toISOString().slice(0, 16),
+    type: template?.type || "Выполнено",
+    title: template?.title || "",
+    teeth: "",
+    text: template?.text || "",
+    next_step: template?.next_step || ""
+  });
+  const [busy, setBusy] = useState(false);
+  const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+
+  const persist = async (nextEntries, message) => {
+    setBusy(true);
+    try {
+      await savePatient(clinicId, {
+        ...patient,
+        dental: { ...(patient.dental || {}), diary_entries: nextEntries }
+      });
+      await onSaved(message);
+    } catch (error) {
+      alert(error.message || "Не удалось сохранить дневник");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!form.title.trim()) return alert("Напишите заголовок записи");
+    if (!form.text.trim()) return alert("Заполните описание дневника");
+    const nextEntry = {
+      ...form,
+      id: entry?.id || uuid(),
+      created_at: entry?.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      title: form.title.trim(),
+      teeth: form.teeth.trim(),
+      text: form.text.trim(),
+      next_step: form.next_step.trim()
+    };
+    const currentEntries = diaryEntries(patient);
+    const nextEntries = entry
+      ? currentEntries.map((item) => item.id === entry.id ? nextEntry : item)
+      : [nextEntry, ...currentEntries];
+    await persist(nextEntries, entry ? "Запись дневника обновлена" : "Запись дневника добавлена");
+  };
+
+  const remove = async () => {
+    if (!entry || !confirm("Удалить запись из дневника пациента?")) return;
+    await persist(diaryEntries(patient).filter((item) => item.id !== entry.id), "Запись дневника удалена");
+  };
+
+  return (
+    <Modal title={entry ? "Редактирование дневника" : "Новая запись дневника"} onClose={onClose} large>
+      <form onSubmit={submit}>
+        {!entry && (
+          <div className="template-picker">
+            <span><Sparkles />Шаблоны дневника</span>
+            <div>{diaryTemplates.map((item) => (
+              <button type="button" key={item.title} onClick={() => setForm((current) => ({ ...current, ...item }))}>{item.title}</button>
+            ))}</div>
+          </div>
+        )}
+        <div className="form-grid">
+          <Field label="Дата и время"><input type="datetime-local" value={(form.date || "").slice(0, 16)} onChange={(event) => set("date", event.target.value)} /></Field>
+          <Field label="Тип записи"><select value={form.type} onChange={(event) => set("type", event.target.value)}>{["Выполнено", "План", "Динамика", "Контроль", "Комментарий", "Риск", "Другое"].map((value) => <option key={value}>{value}</option>)}</select></Field>
+          <Field label="Заголовок *" full><input value={form.title} onChange={(event) => set("title", event.target.value)} placeholder="Например: лечение 16, контроль динамики" autoFocus /></Field>
+          <Field label="Зуб / область"><input value={form.teeth || ""} onChange={(event) => set("teeth", event.target.value)} placeholder="Например: 16, 24–26" /></Field>
+          <Field label="Что сделали / что наблюдаем *" full><textarea value={form.text} onChange={(event) => set("text", event.target.value)} placeholder="Опишите лечение, состояние, жалобы, динамику или важные договорённости." /></Field>
+          <Field label="Что дальше" full><textarea value={form.next_step || ""} onChange={(event) => set("next_step", event.target.value)} placeholder="Следующий этап, контроль, что подготовить к будущему визиту." /></Field>
+        </div>
+        <div className="modal-actions treatment-editor-actions">
+          {entry && <button type="button" className="danger-action" disabled={busy} onClick={remove}><Trash2 />Удалить</button>}
+          <span />
+          <button type="button" className="secondary" disabled={busy} onClick={onClose}>Отмена</button>
+          <button className="primary" disabled={busy}>{busy ? "Сохранение…" : "Сохранить"}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function Anamnesis({ patient }) {
   const a = patient.anamnesis || {};
   const risks = [
@@ -1889,7 +2153,7 @@ function PatientEditor({ patient, clinicId, onClose, onSaved }) {
   );
 }
 
-function VisitEditor({ patient, visit, presetDate, clinicId, onClose, onSaved }) {
+function VisitEditor({ patient, visit, presetDate, clinicId, onClose, onSaved, onDeleted, onOpenPatient }) {
   const [form, setForm] = useState(visit ? structuredClone(visit) : {
     patient_id: patient.id, date: presetDate || new Date().toISOString().slice(0, 16), teeth: "",
     visit_kind: "Первичный визит", treatment_type: "Консультация", complaint: "", diagnosis: "", procedure_description: "",
@@ -1908,9 +2172,29 @@ function VisitEditor({ patient, visit, presetDate, clinicId, onClose, onSaved })
     catch (error) { alert(error.message || "Не удалось сохранить визит"); }
     finally { setBusy(false); }
   };
+  const remove = async () => {
+    if (!visit || !confirm("Удалить только эту запись визита? Карточка пациента останется.")) return;
+    setBusy(true);
+    try {
+      await deleteVisit(clinicId, visit.id);
+      const afterDelete = onDeleted || onSaved;
+      if (afterDelete) await afterDelete();
+    } catch (error) {
+      alert(error.message || "Не удалось удалить визит");
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <Modal title={visit ? "Редактирование визита" : "Новый визит"} onClose={onClose} large>
       <form onSubmit={submit}>
+        {visit && (
+          <div className="visit-editor-notice">
+            <CalendarDays />
+            <span><strong>Вы редактируете запись визита.</strong><small>Удаление здесь удалит только запись в календаре, не карточку пациента.</small></span>
+            {onOpenPatient && <button type="button" className="secondary" onClick={onOpenPatient}><UserRound />Карточка</button>}
+          </div>
+        )}
         <div className="form-grid">
           <Field label="Дата и время"><input type="datetime-local" value={(form.date || "").slice(0, 16)} onChange={(e) => set("date", e.target.value)} /></Field>
           <Field label="Тип визита"><select value={form.visit_kind || "Первичный визит"} onChange={(e) => set("visit_kind", e.target.value)}>{["Первичный визит", "Повторный визит", "Контрольный визит", "Экстренный визит", "Онлайн-консультация", "Другое"].map((v) => <option key={v}>{v}</option>)}</select></Field>
@@ -1927,7 +2211,12 @@ function VisitEditor({ patient, visit, presetDate, clinicId, onClose, onSaved })
           <div className="debt-preview full"><span>Задолженность</span><strong>{money.format(debt)}</strong></div>
           <Field label="Следующий визит"><input type="datetime-local" value={(form.next_visit_date || "").slice(0, 16)} onChange={(e) => set("next_visit_date", e.target.value)} /></Field>
         </div>
-        <ModalActions busy={busy} onCancel={onClose} />
+        <div className="modal-actions treatment-editor-actions">
+          {visit && <button type="button" className="danger-action" disabled={busy} onClick={remove}><Trash2 />Удалить запись</button>}
+          <span />
+          <button type="button" className="secondary" disabled={busy} onClick={onClose}>Отмена</button>
+          <button className="primary" disabled={busy}>{busy ? "Сохранение…" : "Сохранить"}</button>
+        </div>
       </form>
     </Modal>
   );

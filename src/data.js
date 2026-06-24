@@ -207,6 +207,18 @@ export async function saveVisit(clinicId, visit) {
   return data;
 }
 
+export async function deleteVisit(clinicId, visitId) {
+  if (!cloudEnabled) {
+    const data = readDemo();
+    data.visits = data.visits.filter((visit) => visit.id !== visitId);
+    data.transactions = data.transactions.filter((transaction) => transaction.visit_id !== visitId);
+    writeDemo(data);
+    return;
+  }
+  const { error } = await supabase.from("visits").delete().eq("clinic_id", clinicId).eq("id", visitId);
+  if (error) throw error;
+}
+
 function syncDemoVisitTransaction(store, visit, type, amount, comment) {
   const index = store.transactions.findIndex((t) => t.visit_id === visit.id && t.type === type && t.comment === comment);
   if (amount <= 0) {
