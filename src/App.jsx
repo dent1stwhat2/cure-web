@@ -55,22 +55,36 @@ const diaryEntries = (patient) => Array.isArray(patient?.dental?.diary_entries)
   : [];
 const toothChart = (patient) => patient?.dental?.tooth_chart || {};
 const toothStatusCatalog = [
-  { value: "Здоров", label: "Здоров", short: "OK", tone: "healthy" },
-  { value: "Кариес", label: "Кариес", short: "CAR", tone: "danger" },
-  { value: "Пульпит", label: "Пульпит", short: "PUL", tone: "danger" },
-  { value: "Периодонтит", label: "Периодонтит", short: "PER", tone: "danger" },
+  { value: "Здоров", label: "Здоров", short: "норма", tone: "healthy" },
+  { value: "Кариес", label: "Кариес", short: "кар", tone: "danger" },
+  { value: "Пульпит", label: "Пульпит", short: "пул", tone: "danger" },
+  { value: "Периодонтит", label: "Периодонтит", short: "пер", tone: "danger" },
   { value: "Пломба", label: "Пломба", short: "ПЛ", tone: "previous" },
   { value: "Коронка", label: "Коронка", short: "КР", tone: "crown" },
-  { value: "Имплантат", label: "Имплантат", short: "IMP", tone: "implant" },
-  { value: "Канал", label: "Эндо / канал", short: "ENDO", tone: "endo" },
-  { value: "Запланировано", label: "Запланировано", short: "PLAN", tone: "planned" },
+  { value: "Имплантат", label: "Имплантат", short: "ИМП", tone: "implant" },
+  { value: "Канал", label: "Эндо / канал", short: "эндо", tone: "endo" },
+  { value: "Запланировано", label: "Запланировано", short: "план", tone: "planned" },
   { value: "В процессе", label: "В процессе", short: "↻", tone: "process" },
   { value: "Выполнено", label: "Выполнено", short: "✓", tone: "done" },
-  { value: "Наблюдение", label: "Наблюдение", short: "OBS", tone: "watch" },
+  { value: "Наблюдение", label: "Наблюдение", short: "набл", tone: "watch" },
   { value: "Удалён", label: "Удалён", short: "—", tone: "missing" }
 ];
 const toothStatusMeta = (status = "Здоров") => toothStatusCatalog.find((item) => item.value === status) || toothStatusCatalog[0];
 const toothIsProblem = (status = "") => ["Кариес", "Пульпит", "Периодонтит"].includes(status);
+const toothDiagnosisOptions = toothStatusCatalog.filter((item) => !["Здоров", "Запланировано", "В процессе", "Выполнено"].includes(item.value));
+const normalizeToothDiagnoses = (record = {}) => {
+  const values = Array.isArray(record.diagnoses) ? record.diagnoses : [];
+  if (record.status && record.status !== "Здоров" && !values.includes(record.status)) values.unshift(record.status);
+  return [...new Set(values.filter(Boolean))];
+};
+const toothPrimaryStatus = (record = {}, fallback = "Здоров") => {
+  const diagnoses = normalizeToothDiagnoses(record);
+  return diagnoses.find(toothIsProblem) || diagnoses[0] || (record.status && record.status !== "Здоров" ? record.status : fallback);
+};
+const photoMentionsTooth = (photo, tooth) => {
+  const text = `${photo.category || ""} ${photo.comment || ""}`;
+  return new RegExp(`(^|\\D)${tooth}(\\D|$)`).test(text);
+};
 const toothRows = [
   ["Верхняя челюсть", ["18", "17", "16", "15", "14", "13", "12", "11", "21", "22", "23", "24", "25", "26", "27", "28"]],
   ["Нижняя челюсть", ["48", "47", "46", "45", "44", "43", "42", "41", "31", "32", "33", "34", "35", "36", "37", "38"]]
@@ -1090,6 +1104,7 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
           clinicId={clinicId}
           onClose={() => setToothEditor(null)}
           onSaved={async () => { await refresh(); setToothEditor(null); notify("Зубная формула обновлена"); }}
+          onPhotoSaved={async () => { await refresh(); notify("Фото добавлено к зубу"); }}
         />
       )}
       {documentUploader && (
@@ -1278,7 +1293,7 @@ function toothClinicalContext(patient, data = {}, tooth) {
   const diary = diaryEntries(patient).filter((entry) => extractPlanTeeth(`${entry.teeth || ""} ${entry.title || ""} ${entry.text || ""} ${entry.next_step || ""}`).includes(tooth));
   const visits = (data.visits || []).filter((visit) => visit.patient_id === patient.id && extractPlanTeeth(`${visit.teeth || ""} ${visit.diagnosis || ""} ${visit.procedure_description || ""}`).includes(tooth));
   const visitIds = new Set(visits.map((visit) => visit.id));
-  const photos = (data.photos || []).filter((photo) => photo.patient_id === patient.id && photo.visit_id && visitIds.has(photo.visit_id));
+  const photos = (data.photos || []).filter((photo) => photo.patient_id === patient.id && ((photo.visit_id && visitIds.has(photo.visit_id)) || photoMentionsTooth(photo, tooth)));
   const latestVisit = visits.sort((a, b) => new Date(b.date) - new Date(a.date))[0];
   const lastPlan = activePlan[activePlan.length - 1];
   const autoStatus = activePlan.some((item) => item.status === "В процессе")
@@ -1288,13 +1303,20 @@ function toothClinicalContext(patient, data = {}, tooth) {
       : activePlan.some((item) => item.status === "Выполнено")
         ? "Выполнено"
         : "Здоров";
-  const status = record.status && record.status !== "Здоров" ? record.status : autoStatus;
+  const diagnoses = normalizeToothDiagnoses(record);
+  const status = toothPrimaryStatus(record, autoStatus);
   const meta = toothStatusMeta(status);
-  const attention = toothIsProblem(status) || activePlan.some((item) => item.status !== "Выполнено") || diary.some((entry) => entry.type === "Риск");
+  const displayTags = (diagnoses.length ? diagnoses : [status])
+    .filter(Boolean)
+    .filter((value, index, array) => array.indexOf(value) === index)
+    .slice(0, 3);
+  const attention = diagnoses.some(toothIsProblem) || toothIsProblem(status) || activePlan.some((item) => item.status !== "Выполнено") || diary.some((entry) => entry.type === "Риск");
   return {
     record,
     status,
     meta,
+    diagnoses,
+    displayTags,
     plan,
     activePlan,
     diary,
@@ -1303,7 +1325,7 @@ function toothClinicalContext(patient, data = {}, tooth) {
     latestVisit,
     lastPlan,
     attention,
-    title: record.diagnosis || lastPlan?.name || latestVisit?.diagnosis || meta.label,
+    title: record.diagnosis || diagnoses.join(", ") || record.action || lastPlan?.name || latestVisit?.diagnosis || meta.label,
     subtitle: [
       activePlan.length ? `${activePlan.length} в плане` : "",
       visits.length ? `${visits.length} виз.` : "",
@@ -1317,7 +1339,7 @@ function dentalOverview(patient, data = {}) {
   const contexts = toothRows.flatMap(([, teeth]) => teeth.map((tooth) => [tooth, toothClinicalContext(patient, data, tooth)]));
   return {
     contexts,
-    problems: contexts.filter(([, context]) => toothIsProblem(context.status)),
+    problems: contexts.filter(([, context]) => toothIsProblem(context.status) || context.diagnoses.some(toothIsProblem)),
     planned: contexts.filter(([, context]) => context.activePlan.some((item) => item.status !== "Выполнено")),
     done: contexts.filter(([, context]) => context.status === "Выполнено"),
     missing: contexts.filter(([, context]) => context.status === "Удалён"),
@@ -1334,10 +1356,10 @@ function DentalChart({ patient, data, onSelect }) {
     <div className="section-block dental-chart-section">
       <div className="section-heading"><div><h2>Умная клиническая карта</h2><p>Зубная формула, план лечения, дневник, визиты и фото в одном месте</p></div></div>
       <div className="clinical-map-summary">
-        <article><strong>{overview.problems.length}</strong><span>проблемных</span></article>
-        <article><strong>{overview.planned.length}</strong><span>в плане</span></article>
-        <article><strong>{overview.done.length}</strong><span>выполнено</span></article>
-        <article><strong>{overview.missing.length}</strong><span>удалено</span></article>
+        <article className="summary-danger"><strong>{overview.problems.length}</strong><span>проблемных</span></article>
+        <article className="summary-planned"><strong>{overview.planned.length}</strong><span>в плане</span></article>
+        <article className="summary-done"><strong>{overview.done.length}</strong><span>выполнено</span></article>
+        <article className="summary-muted"><strong>{overview.missing.length}</strong><span>удалено</span></article>
       </div>
       <div className="dental-chart card">
         {toothRows.map(([label, teeth]) => (
@@ -1348,12 +1370,16 @@ function DentalChart({ patient, data, onSelect }) {
               return (
                 <button key={number} className={`tooth smart-tooth tooth-tone-${context.meta.tone} ${context.attention ? "attention" : ""}`} onClick={() => onSelect(number)} title={`Зуб ${number}: ${context.title}`}>
                   <strong>{number}</strong>
-                  <small>{context.record.short || context.meta.short}</small>
+                  <span className="tooth-tags">
+                    {(context.record.short ? [context.record.short] : context.displayTags.map((tag) => toothStatusMeta(tag).short)).map((tag, index) => (
+                      <small key={`${tag}-${index}`}>{tag}</small>
+                    ))}
+                  </span>
                   {(context.activePlan.length > 0 || context.visits.length > 0 || context.photos.length > 0) && (
                     <span className="tooth-indicators">
-                      {context.activePlan.length > 0 && <i>P</i>}
-                      {context.visits.length > 0 && <i>V</i>}
-                      {context.photos.length > 0 && <i>F</i>}
+                      {context.activePlan.length > 0 && <i>П</i>}
+                      {context.visits.length > 0 && <i>В</i>}
+                      {context.photos.length > 0 && <i>Ф</i>}
                     </span>
                   )}
                 </button>
@@ -1383,27 +1409,42 @@ function DentalChart({ patient, data, onSelect }) {
   );
 }
 
-function ToothEditor({ patient, tooth, data, clinicId, onClose, onSaved }) {
+function ToothEditor({ patient, tooth, data, clinicId, onClose, onSaved, onPhotoSaved }) {
   const existing = toothChart(patient)[tooth] || {};
   const [form, setForm] = useState({
     status: existing.status || "Здоров",
+    diagnoses: normalizeToothDiagnoses(existing),
     diagnosis: existing.diagnosis || "",
     short: existing.short || "",
+    action: existing.action || "",
     risk: existing.risk || "",
     prognosis: existing.prognosis || "",
     next_step: existing.next_step || "",
     note: existing.note || ""
   });
   const [busy, setBusy] = useState(false);
+  const [photoUploader, setPhotoUploader] = useState(false);
   const context = toothClinicalContext(patient, data, tooth);
-  const canClear = form.status === "Здоров" && !form.diagnosis.trim() && !form.short.trim() && !form.risk.trim() && !form.prognosis.trim() && !form.next_step.trim() && !form.note.trim();
+  const toggleDiagnosis = (value) => {
+    setForm((current) => {
+      const values = Array.isArray(current.diagnoses) ? current.diagnoses : [];
+      return {
+        ...current,
+        diagnoses: values.includes(value) ? values.filter((item) => item !== value) : [...values, value]
+      };
+    });
+  };
+  const canClear = form.status === "Здоров" && !form.diagnoses.length && !form.diagnosis.trim() && !form.short.trim() && !form.action.trim() && !form.risk.trim() && !form.prognosis.trim() && !form.next_step.trim() && !form.note.trim();
   const save = async (event) => {
     event.preventDefault();
     setBusy(true);
     try {
       const nextChart = { ...toothChart(patient) };
       if (canClear) delete nextChart[tooth];
-      else nextChart[tooth] = { ...form, updated_at: new Date().toISOString() };
+      else {
+        const primaryStatus = form.diagnoses.find(toothIsProblem) || form.diagnoses[0] || form.status || "Здоров";
+        nextChart[tooth] = { ...form, status: primaryStatus, updated_at: new Date().toISOString() };
+      }
       await savePatient(clinicId, { ...patient, dental: { ...(patient.dental || {}), tooth_chart: nextChart } });
       await onSaved();
     } catch (error) {
@@ -1426,9 +1467,19 @@ function ToothEditor({ patient, tooth, data, clinicId, onClose, onSaved }) {
             </select>
           </Field>
           <Field label="Короткая метка">
-            <input value={form.short} onChange={(event) => setForm((current) => ({ ...current, short: event.target.value }))} placeholder="Напр.: MOD, E-max, 2.6" />
+              <input value={form.short} onChange={(event) => setForm((current) => ({ ...current, short: event.target.value }))} placeholder="Напр.: MOD, E-max, 2.6" />
+            </Field>
+          <Field label="Диагнозы / статусы зуба" full>
+            <div className="tooth-diagnosis-picker">
+              {toothDiagnosisOptions.map((item) => (
+                <button type="button" key={item.value} className={`tooth-tone-${item.tone} ${form.diagnoses.includes(item.value) ? "selected" : ""}`} onClick={() => toggleDiagnosis(item.value)}>
+                  <Check />{item.label}
+                </button>
+              ))}
+            </div>
           </Field>
           <Field label="Диагноз / находка" full><input value={form.diagnosis} onChange={(event) => setForm((current) => ({ ...current, diagnosis: event.target.value }))} placeholder="Например: кариес дентина, наблюдение, ранее лечен" /></Field>
+          <Field label="Что делаем по зубу" full><textarea value={form.action} onChange={(event) => setForm((current) => ({ ...current, action: event.target.value }))} placeholder="Например: лечение кариеса MOD, эндо, временная реставрация, коронка, контроль через 3 месяца" /></Field>
           <Field label="Риск"><input value={form.risk} onChange={(event) => setForm((current) => ({ ...current, risk: event.target.value }))} placeholder="Скол, боль, перегрузка..." /></Field>
           <Field label="Прогноз"><select value={form.prognosis} onChange={(event) => setForm((current) => ({ ...current, prognosis: event.target.value }))}><option value="">Не указан</option>{["Благоприятный", "Осторожный", "Сомнительный", "Неблагоприятный"].map((value) => <option key={value}>{value}</option>)}</select></Field>
           <Field label="Следующее действие" full><textarea value={form.next_step} onChange={(event) => setForm((current) => ({ ...current, next_step: event.target.value }))} placeholder="Что сделать на следующем визите или что обсудить с пациентом" /></Field>
@@ -1444,8 +1495,39 @@ function ToothEditor({ patient, tooth, data, clinicId, onClose, onSaved }) {
             {!context.visits.length && !context.diary.length && <p className="muted">Записей по этому зубу пока нет.</p>}
           </InfoCard>
         </div>
+        <div className="tooth-photo-section">
+          <div className="section-heading compact">
+            <div><h2>Фото зуба</h2><p>{context.photos.length ? `${context.photos.length} фото привязано к зубу ${tooth}` : "Добавьте снимки, фото этапов или результат по этому зубу"}</p></div>
+            <button type="button" className="primary" onClick={() => setPhotoUploader(true)}><Camera />Добавить фото</button>
+          </div>
+          {context.photos.length ? (
+            <div className="tooth-photo-strip">
+              {context.photos.slice(0, 8).map((photo) => (
+                <a href={photo.signed_url} target="_blank" rel="noreferrer" className="tooth-photo-thumb" key={photo.id}>
+                  <img src={photo.signed_url} alt={photo.category} />
+                  <span>{photo.category}</span>
+                </a>
+              ))}
+            </div>
+          ) : (
+            <button type="button" className="tooth-photo-empty" onClick={() => setPhotoUploader(true)}><Camera />Добавить первое фото зуба {tooth}</button>
+          )}
+        </div>
         <ModalActions busy={busy} onCancel={onClose} />
       </form>
+      {photoUploader && (
+        <PhotoUploader
+          patient={patient}
+          visits={(data.visits || []).filter((visit) => visit.patient_id === patient.id)}
+          clinicId={clinicId}
+          presetTooth={tooth}
+          onClose={() => setPhotoUploader(false)}
+          onSaved={async () => {
+            setPhotoUploader(false);
+            await onPhotoSaved?.();
+          }}
+        />
+      )}
     </Modal>
   );
 }
@@ -2769,26 +2851,33 @@ function TransactionEditor({ patients, visits, presetPatient, clinicId, onClose,
   );
 }
 
-function PhotoUploader({ patient, visits, clinicId, onClose, onSaved }) {
+function PhotoUploader({ patient, visits, clinicId, onClose, onSaved, presetTooth }) {
   const [files, setFiles] = useState([]);
   const [category, setCategory] = useState("До лечения");
   const [visitId, setVisitId] = useState("");
+  const [comment, setComment] = useState(presetTooth ? `Фото привязано к зубу ${presetTooth}` : "");
   const [busy, setBusy] = useState(false);
   const appendFiles = (list) => setFiles((current) => [...current, ...list]);
   const submit = async (event) => {
     event.preventDefault();
     if (!files.length) return alert("Выберите фотографии");
     setBusy(true);
-    try { await uploadPhotos(clinicId, patient.id, visitId, category, files); await onSaved(); }
+    try {
+      const finalCategory = presetTooth ? `Зуб ${presetTooth} · ${category}` : category;
+      await uploadPhotos(clinicId, patient.id, visitId, finalCategory, files, comment);
+      await onSaved();
+    }
     catch (error) { alert(error.message || "Не удалось добавить фото"); }
     finally { setBusy(false); }
   };
   return (
-    <Modal title="Добавление фото" onClose={onClose}>
+    <Modal title={presetTooth ? `Добавление фото зуба ${presetTooth}` : "Добавление фото"} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
+          {presetTooth && <div className="selected-files full"><Camera />Фото будет привязано к зубу {presetTooth}</div>}
           <Field label="Категория"><select value={category} onChange={(e) => setCategory(e.target.value)}>{["До лечения", "Этап лечения", "После лечения", "Рентген / КЛКТ", "Документы", "Другое"].map((v) => <option key={v}>{v}</option>)}</select></Field>
           <Field label="Привязать к визиту"><select value={visitId} onChange={(e) => setVisitId(e.target.value)}><option value="">Без привязки</option>{visits.map((v) => <option value={v.id} key={v.id}>{safeDate(v.date)} · {v.visit_kind || "Визит"} · {v.treatment_type}</option>)}</select></Field>
+          <Field label="Комментарий" full><textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Комментарий к фото" /></Field>
           <label className="upload-zone">
             <Upload />
             <strong>Выбрать из галереи</strong>

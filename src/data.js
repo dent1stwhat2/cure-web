@@ -298,7 +298,7 @@ async function compressImage(file) {
   return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
 }
 
-export async function uploadPhotos(clinicId, patientId, visitId, category, files) {
+export async function uploadPhotos(clinicId, patientId, visitId, category, files, comment = "") {
   if (!cloudEnabled) {
     const data = readDemo();
     for (const file of files) {
@@ -309,7 +309,7 @@ export async function uploadPhotos(clinicId, patientId, visitId, category, files
       });
       data.photos.unshift({
         id: crypto.randomUUID(), patient_id: patientId, visit_id: visitId || null,
-        category, comment: "", signed_url: url, storage_path: "", created_at: new Date().toISOString()
+        category, comment, signed_url: url, storage_path: "", created_at: new Date().toISOString()
       });
     }
     writeDemo(data);
@@ -324,7 +324,7 @@ export async function uploadPhotos(clinicId, patientId, visitId, category, files
     if (uploadError) throw uploadError;
     const { error } = await supabase.from("photo_records").insert({
       clinic_id: clinicId, patient_id: patientId, visit_id: visitId || null,
-      category, storage_path: name
+      category, comment, storage_path: name
     });
     if (error) {
       await supabase.storage.from("clinical-photos").remove([name]);

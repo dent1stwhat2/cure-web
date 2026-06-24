@@ -331,13 +331,19 @@ button:disabled { opacity: .55; cursor: wait; }
 .tooth-legend { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 18px; }
 .tooth-legend span { padding: 6px 9px; border-radius: 99px; font-size: 10px; }
 .clinical-map-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
-.clinical-map-summary article { padding: 14px 16px; border: 1px solid var(--line); border-radius: 18px; background: white; }
+.clinical-map-summary article { position: relative; overflow: hidden; padding: 14px 16px; border: 1px solid var(--line); border-radius: 18px; background: white; }
+.clinical-map-summary article::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 5px; background: var(--blue); }
+.clinical-map-summary .summary-danger::before { background: #D86A5F; }
+.clinical-map-summary .summary-planned::before { background: #C8B77A; }
+.clinical-map-summary .summary-done::before { background: #7FA37B; }
+.clinical-map-summary .summary-muted::before { background: #8E8E93; }
 .clinical-map-summary strong { display: block; font-size: 24px; line-height: 1; }
 .clinical-map-summary span { color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
 .smart-tooth { position: relative; min-height: 78px; align-items: stretch; padding: 9px 6px; transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
 .smart-tooth:hover { transform: translateY(-2px); box-shadow: 0 12px 24px rgba(28,28,30,.08); }
 .smart-tooth.attention::before { content: ""; position: absolute; inset: 5px 5px auto auto; width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent); }
-.smart-tooth small { align-self: center; max-width: 100%; padding: 3px 6px; border-radius: 99px; background: rgba(255,255,255,.58); color: inherit; font-weight: 900; }
+.tooth-tags { min-height: 21px; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 3px; }
+.smart-tooth small { align-self: center; max-width: 100%; padding: 3px 6px; border-radius: 99px; background: rgba(255,255,255,.58); color: inherit; font-size: 8px; font-weight: 900; text-transform: lowercase; }
 .tooth-indicators { display: flex; justify-content: center; gap: 3px; margin-top: 2px; }
 .tooth-indicators i { width: 14px; height: 14px; display: grid; place-items: center; border-radius: 50%; color: white; background: rgba(28,28,30,.38); font-size: 8px; font-style: normal; font-weight: 900; }
 .tooth-tone-healthy { color: #55715E !important; border-color: #DCE9DF !important; background: #F4FAF5 !important; }
@@ -364,6 +370,18 @@ button:disabled { opacity: .55; cursor: wait; }
 .tooth-editor-hero span { font-size: 18px; font-weight: 900; }
 .tooth-editor-hero small { color: inherit; opacity: .74; }
 .tooth-linked-data { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.tooth-diagnosis-picker { display: flex; flex-wrap: wrap; gap: 8px; }
+.tooth-diagnosis-picker button { min-height: 36px; display: inline-flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; font-weight: 850; opacity: .72; }
+.tooth-diagnosis-picker button svg { width: 14px; opacity: 0; }
+.tooth-diagnosis-picker button.selected { opacity: 1; box-shadow: inset 0 0 0 1px currentColor; }
+.tooth-diagnosis-picker button.selected svg { opacity: 1; }
+.tooth-photo-section { margin-top: 18px; padding: 16px; border: 1px solid var(--line); border-radius: 20px; background: rgba(255,255,255,.45); }
+.tooth-photo-section .section-heading { align-items: center; }
+.tooth-photo-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+.tooth-photo-thumb { overflow: hidden; display: flex; flex-direction: column; min-height: 132px; border: 1px solid var(--line); border-radius: 16px; background: white; text-decoration: none; }
+.tooth-photo-thumb img { width: 100%; height: 94px; object-fit: cover; background: #111; }
+.tooth-photo-thumb span { padding: 8px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 800; }
+.tooth-photo-empty { width: 100%; min-height: 70px; display: flex; align-items: center; justify-content: center; gap: 9px; border: 1px dashed var(--line); border-radius: 16px; color: var(--blue); background: rgba(255,255,255,.45); font-weight: 850; }
 .timeline { position: relative; display: flex; flex-direction: column; gap: 0; }
 .timeline::before { content: ""; position: absolute; left: 21px; top: 22px; bottom: 22px; width: 1px; background: var(--line); }
 .timeline-item { position: relative; display: grid; grid-template-columns: 44px 1fr; gap: 13px; padding: 10px 0; }
@@ -651,7 +669,8 @@ button:disabled { opacity: .55; cursor: wait; }
 [data-theme="dark"] .clinical-map-summary article,
 [data-theme="dark"] .tooth-editor-hero {
   border-color: var(--cure-border);
-  background: var(--cure-surface);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--cure-surface) 92%, #fff 8%), var(--cure-surface));
+  box-shadow: 0 14px 34px rgba(0,0,0,.22);
 }
 
 [data-theme="dark"] .smart-tooth small,
@@ -660,16 +679,39 @@ button:disabled { opacity: .55; cursor: wait; }
   background: rgba(255,255,255,.08);
 }
 
-[data-theme="dark"] .tooth-tone-healthy { color: #9FC7A8 !important; border-color: color-mix(in srgb, #9FC7A8 26%, var(--cure-border)) !important; background: color-mix(in srgb, #9FC7A8 13%, var(--cure-surface)) !important; }
-[data-theme="dark"] .tooth-tone-danger { color: #F0A09B !important; border-color: color-mix(in srgb, #F0A09B 30%, var(--cure-border)) !important; background: color-mix(in srgb, #E86B5D 14%, var(--cure-surface)) !important; }
-[data-theme="dark"] .tooth-tone-previous { color: #9DC3DF !important; border-color: color-mix(in srgb, #9DC3DF 28%, var(--cure-border)) !important; background: color-mix(in srgb, #6EA8CF 14%, var(--cure-surface)) !important; }
-[data-theme="dark"] .tooth-tone-crown { color: #E1C978 !important; border-color: color-mix(in srgb, #E1C978 30%, var(--cure-border)) !important; background: color-mix(in srgb, #C8B77A 14%, var(--cure-surface)) !important; }
-[data-theme="dark"] .tooth-tone-implant { color: #C7C1B7 !important; border-color: color-mix(in srgb, #C7C1B7 25%, var(--cure-border)) !important; background: color-mix(in srgb, #AAA197 13%, var(--cure-surface)) !important; }
-[data-theme="dark"] .tooth-tone-endo { color: #D7A8DF !important; border-color: color-mix(in srgb, #D7A8DF 28%, var(--cure-border)) !important; background: color-mix(in srgb, #B375BD 14%, var(--cure-surface)) !important; }
-[data-theme="dark"] .tooth-tone-planned { color: #E4D189 !important; border-color: color-mix(in srgb, #E4D189 30%, var(--cure-border)) !important; background: color-mix(in srgb, #C8B77A 15%, var(--cure-surface)) !important; }
-[data-theme="dark"] .tooth-tone-process { color: #E7B177 !important; border-color: color-mix(in srgb, #E7B177 30%, var(--cure-border)) !important; background: color-mix(in srgb, #C58B4D 14%, var(--cure-surface)) !important; }
-[data-theme="dark"] .tooth-tone-done { color: #9CCF9B !important; border-color: color-mix(in srgb, #9CCF9B 30%, var(--cure-border)) !important; background: color-mix(in srgb, #73B277 14%, var(--cure-surface)) !important; }
-[data-theme="dark"] .tooth-tone-watch { color: #E7D36F !important; border-color: color-mix(in srgb, #E7D36F 30%, var(--cure-border)) !important; background: color-mix(in srgb, #C8B77A 14%, var(--cure-surface)) !important; }
+[data-theme="dark"] .smart-tooth,
+[data-theme="dark"] .tooth-focus-card,
+[data-theme="dark"] .tooth-diagnosis-picker button,
+[data-theme="dark"] .tooth-photo-thumb,
+[data-theme="dark"] .tooth-photo-empty {
+  box-shadow: none;
+}
+
+[data-theme="dark"] .tooth-photo-section {
+  border-color: var(--cure-border);
+  background: var(--cure-surface-soft);
+}
+
+[data-theme="dark"] .tooth-photo-thumb {
+  border-color: var(--cure-border);
+  background: var(--cure-surface);
+}
+
+[data-theme="dark"] .tooth-photo-empty {
+  border-color: var(--cure-border);
+  background: color-mix(in srgb, var(--cure-gold) 7%, var(--cure-surface));
+}
+
+[data-theme="dark"] .tooth-tone-healthy { color: #B7D2BC !important; border-color: color-mix(in srgb, #9FC7A8 22%, var(--cure-border)) !important; background: linear-gradient(135deg, color-mix(in srgb, #9FC7A8 9%, var(--cure-surface)), var(--cure-surface-soft)) !important; }
+[data-theme="dark"] .tooth-tone-danger { color: #F2A8A2 !important; border-color: color-mix(in srgb, #F0A09B 32%, var(--cure-border)) !important; background: linear-gradient(135deg, color-mix(in srgb, #E86B5D 18%, var(--cure-surface)), var(--cure-surface-soft)) !important; }
+[data-theme="dark"] .tooth-tone-previous { color: #B5D4E8 !important; border-color: color-mix(in srgb, #9DC3DF 26%, var(--cure-border)) !important; background: linear-gradient(135deg, color-mix(in srgb, #6EA8CF 13%, var(--cure-surface)), var(--cure-surface-soft)) !important; }
+[data-theme="dark"] .tooth-tone-crown { color: #E7D084 !important; border-color: color-mix(in srgb, #E1C978 30%, var(--cure-border)) !important; background: linear-gradient(135deg, color-mix(in srgb, #C8B77A 15%, var(--cure-surface)), var(--cure-surface-soft)) !important; }
+[data-theme="dark"] .tooth-tone-implant { color: #D0CBC2 !important; border-color: color-mix(in srgb, #C7C1B7 24%, var(--cure-border)) !important; background: linear-gradient(135deg, color-mix(in srgb, #AAA197 12%, var(--cure-surface)), var(--cure-surface-soft)) !important; }
+[data-theme="dark"] .tooth-tone-endo { color: #DEB5E5 !important; border-color: color-mix(in srgb, #D7A8DF 28%, var(--cure-border)) !important; background: linear-gradient(135deg, color-mix(in srgb, #B375BD 14%, var(--cure-surface)), var(--cure-surface-soft)) !important; }
+[data-theme="dark"] .tooth-tone-planned { color: #E7D48B !important; border-color: color-mix(in srgb, #E4D189 30%, var(--cure-border)) !important; background: linear-gradient(135deg, color-mix(in srgb, #C8B77A 15%, var(--cure-surface)), var(--cure-surface-soft)) !important; }
+[data-theme="dark"] .tooth-tone-process { color: #E9B77F !important; border-color: color-mix(in srgb, #E7B177 30%, var(--cure-border)) !important; background: linear-gradient(135deg, color-mix(in srgb, #C58B4D 15%, var(--cure-surface)), var(--cure-surface-soft)) !important; }
+[data-theme="dark"] .tooth-tone-done { color: #A7D4A6 !important; border-color: color-mix(in srgb, #9CCF9B 30%, var(--cure-border)) !important; background: linear-gradient(135deg, color-mix(in srgb, #73B277 14%, var(--cure-surface)), var(--cure-surface-soft)) !important; }
+[data-theme="dark"] .tooth-tone-watch { color: #EAD978 !important; border-color: color-mix(in srgb, #E7D36F 30%, var(--cure-border)) !important; background: linear-gradient(135deg, color-mix(in srgb, #C8B77A 14%, var(--cure-surface)), var(--cure-surface-soft)) !important; }
 [data-theme="dark"] .tooth-tone-missing { color: #A1A1A6 !important; border-color: var(--cure-border) !important; background: var(--cure-surface-soft) !important; }
 
 html,
