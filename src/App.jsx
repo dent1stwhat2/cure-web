@@ -22,7 +22,16 @@ const money = new Intl.NumberFormat("ru-RU", {
   style: "currency", currency: "RUB", maximumFractionDigits: 0
 });
 const shortDate = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const pad2 = (value) => String(value).padStart(2, "0");
+const localDateISO = (value = new Date()) => {
+  const date = value instanceof Date ? value : new Date(value);
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+};
+const localDateTimeInput = (value = new Date()) => {
+  const date = value instanceof Date ? value : new Date(value);
+  return `${localDateISO(date)}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+};
+const todayISO = () => localDateISO(new Date());
 const uuid = () => crypto.randomUUID();
 const age = (birthDate) => {
   if (!birthDate) return "—";
@@ -42,11 +51,10 @@ const diaryEntries = (patient) => Array.isArray(patient?.dental?.diary_entries)
   : [];
 const toothChart = (patient) => patient?.dental?.tooth_chart || {};
 const sameDay = (left, right) => {
-  const a = new Date(left);
-  const b = new Date(right);
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  return localDateISO(left) === localDateISO(right);
 };
 const timeLabel = (value) => new Date(value).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+const visitMinuteKey = (value) => localDateTimeInput(value);
 const escapeHtml = (value = "") => String(value).replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
 })[character]);
@@ -619,6 +627,7 @@ function TodayPage({ data, clinicId, refresh, notify, openPatient }) {
         <VisitEditor
           patient={visitEditor.patient}
           visit={visitEditor.visit}
+          visits={data.visits}
           clinicId={clinicId}
           onClose={() => setVisitEditor(null)}
           onOpenPatient={() => openPatient(visitEditor.patient.id)}
@@ -662,7 +671,7 @@ function CalendarPage({ data, clinicId, refresh, notify, openPatient }) {
     next.setMonth(next.getMonth() + delta);
     next.setDate(1);
     setMonthCursor(next);
-    setSelectedDate(next.toISOString().slice(0, 10));
+    setSelectedDate(localDateISO(next));
   };
 
   const jumpToday = () => {
@@ -677,7 +686,7 @@ function CalendarPage({ data, clinicId, refresh, notify, openPatient }) {
     next.setMonth(Number(value));
     next.setDate(1);
     setMonthCursor(next);
-    setSelectedDate(next.toISOString().slice(0, 10));
+    setSelectedDate(localDateISO(next));
   };
 
   const setYear = (value) => {
@@ -685,7 +694,7 @@ function CalendarPage({ data, clinicId, refresh, notify, openPatient }) {
     next.setFullYear(Number(value));
     next.setDate(1);
     setMonthCursor(next);
-    setSelectedDate(next.toISOString().slice(0, 10));
+    setSelectedDate(localDateISO(next));
   };
 
   return (
@@ -712,7 +721,7 @@ function CalendarPage({ data, clinicId, refresh, notify, openPatient }) {
       <div className="calendar-month card">
         {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((day) => <span className="calendar-weekday" key={day}>{day}</span>)}
         {calendarCells.map((date) => {
-          const iso = date.toISOString().slice(0, 10);
+          const iso = localDateISO(date);
           const count = data.visits.filter((visit) => sameDay(visit.date, date)).length;
           const outside = date.getMonth() !== monthCursor.getMonth();
           return (
@@ -742,6 +751,7 @@ function CalendarPage({ data, clinicId, refresh, notify, openPatient }) {
         <VisitEditor
           patient={editorPatient}
           presetDate={`${selectedDate}T09:00`}
+          visits={data.visits}
           clinicId={clinicId}
           onClose={() => setEditorPatient(null)}
           onSaved={async () => { await refresh(); setEditorPatient(null); notify("Визит назначен"); }}
@@ -751,6 +761,7 @@ function CalendarPage({ data, clinicId, refresh, notify, openPatient }) {
         <VisitEditor
           patient={visitEditor.patient}
           visit={visitEditor.visit}
+          visits={data.visits}
           clinicId={clinicId}
           onClose={() => setVisitEditor(null)}
           onOpenPatient={() => openPatient(visitEditor.patient.id)}
@@ -818,7 +829,7 @@ function PatientsPage({ data, clinicId, refresh, openPatient, notify }) {
       ) : (
         <Empty icon={<Users />} title="Пациентов пока нет" text="Добавьте первого пациента — карточка сразу появится на всех устройствах клиники." action={() => setEditor(true)} />
       )}
-      {editor && <PatientEditor clinicId={clinicId} onClose={() => setEditor(false)} onSaved={async (message) => { await refresh(); setEditor(false); notify(message || "Пациент сохранён"); }} />}
+      {editor && <PatientEditor visits={data.visits} clinicId={clinicId} onClose={() => setEditor(false)} onSaved={async (message) => { await refresh(); setEditor(false); notify(message || "Пациент сохранён"); }} />}
     </section>
   );
 }
@@ -1023,8 +1034,8 @@ function PatientPage({ patient, data, clinicId, refresh, back, notify }) {
         <NotesSection patient={patient} clinicId={clinicId} refresh={refresh} notify={notify} />
       )}
 
-      {editPatient && <PatientEditor patient={patient} clinicId={clinicId} onClose={() => setEditPatient(false)} onSaved={async (message) => { await refresh(); setEditPatient(false); notify(message || "Карточка обновлена"); }} />}
-      {visitEditor && <VisitEditor patient={patient} visit={visitEditor.id ? visitEditor : null} clinicId={clinicId} onClose={() => setVisitEditor(null)} onSaved={async () => { await refresh(); setVisitEditor(null); notify("Визит сохранён"); }} />}
+      {editPatient && <PatientEditor patient={patient} visits={data.visits} clinicId={clinicId} onClose={() => setEditPatient(false)} onSaved={async (message) => { await refresh(); setEditPatient(false); notify(message || "Карточка обновлена"); }} />}
+      {visitEditor && <VisitEditor patient={patient} visit={visitEditor.id ? visitEditor : null} visits={data.visits} clinicId={clinicId} onClose={() => setVisitEditor(null)} onSaved={async () => { await refresh(); setVisitEditor(null); notify("Визит сохранён"); }} />}
       {photoEditor && <PhotoUploader patient={patient} visits={visits} clinicId={clinicId} onClose={() => setPhotoEditor(false)} onSaved={async () => { await refresh(); setPhotoEditor(false); notify("Фотографии добавлены"); }} />}
       {txEditor && <TransactionEditor patients={data.patients} visits={data.visits} presetPatient={patient} clinicId={clinicId} onClose={() => setTxEditor(false)} onSaved={async () => { await refresh(); setTxEditor(false); notify("Финансовая запись сохранена"); }} />}
       {treatmentEditor && (
@@ -2002,7 +2013,7 @@ function FinancePage({ data, clinicId, refresh, notify }) {
   );
 }
 
-function PatientEditor({ patient, clinicId, onClose, onSaved }) {
+function PatientEditor({ patient, visits = [], clinicId, onClose, onSaved }) {
   const [form, setForm] = useState(patient ? structuredClone(patient) : {
     full_name: "", birth_date: "", gender: "Не указан", phone: "", second_phone: "", email: "",
     address: "", profession: "", source: "Рекомендации", first_visit_date: todayISO(),
@@ -2019,13 +2030,16 @@ function PatientEditor({ patient, clinicId, onClose, onSaved }) {
     if (!form.full_name.trim()) return alert("Введите ФИО пациента");
     if (form.birth_date && new Date(form.birth_date) > new Date()) return alert("Дата рождения не может быть в будущем");
     if (nextAppointment && new Date(nextAppointment) < new Date()) return alert("Следующая запись не может быть в прошлом");
+    if (!patient && nextAppointment && visits.some((visit) => visitMinuteKey(visit.date) === visitMinuteKey(nextAppointment))) {
+      return alert(`На ${safeDate(nextAppointment)} в ${timeLabel(nextAppointment)} уже есть запись. Выберите другое время.`);
+    }
     setBusy(true);
     try {
       const savedPatient = await savePatient(clinicId, form);
       if (!patient && nextAppointment) {
         await saveVisit(clinicId, {
           patient_id: savedPatient.id,
-          date: nextAppointment,
+          date: new Date(nextAppointment).toISOString(),
           teeth: "",
           visit_kind: "Первичный визит",
           treatment_type: appointmentType,
@@ -2153,9 +2167,9 @@ function PatientEditor({ patient, clinicId, onClose, onSaved }) {
   );
 }
 
-function VisitEditor({ patient, visit, presetDate, clinicId, onClose, onSaved, onDeleted, onOpenPatient }) {
+function VisitEditor({ patient, visit, presetDate, visits = [], clinicId, onClose, onSaved, onDeleted, onOpenPatient }) {
   const [form, setForm] = useState(visit ? structuredClone(visit) : {
-    patient_id: patient.id, date: presetDate || new Date().toISOString().slice(0, 16), teeth: "",
+    patient_id: patient.id, date: presetDate || localDateTimeInput(new Date()), teeth: "",
     visit_kind: "Первичный визит", treatment_type: "Консультация", complaint: "", diagnosis: "", procedure_description: "",
     materials: "", anesthesia: "", recommendations: "", doctor_notes: "",
     total_cost: 0, paid_amount: 0, discount: 0, refund: 0, next_visit_date: ""
@@ -2165,10 +2179,21 @@ function VisitEditor({ patient, visit, presetDate, clinicId, onClose, onSaved, o
   const debt = Math.max(0, Number(form.total_cost) - Number(form.discount) - Number(form.paid_amount) + Number(form.refund));
   const submit = async (event) => {
     event.preventDefault();
+    if (!form.date) return alert("Укажите дату и время визита");
     if ([form.total_cost, form.paid_amount, form.discount, form.refund].some((v) => Number(v) < 0)) return alert("Сумма не может быть отрицательной");
     if (Number(form.paid_amount) > Number(form.total_cost) - Number(form.discount) + Number(form.refund)) return alert("Оплата превышает стоимость");
+    const conflict = visits.find((item) => item.id !== form.id && visitMinuteKey(item.date) === visitMinuteKey(form.date));
+    if (conflict) {
+      const conflictPatient = conflict.patient_name || "";
+      return alert(`На ${safeDate(form.date)} в ${timeLabel(form.date)} уже есть запись${conflictPatient ? `: ${conflictPatient}` : ""}. Выберите другое время.`);
+    }
+    const payload = {
+      ...form,
+      date: new Date(form.date).toISOString(),
+      next_visit_date: form.next_visit_date ? new Date(form.next_visit_date).toISOString() : ""
+    };
     setBusy(true);
-    try { await saveVisit(clinicId, form); await onSaved(); }
+    try { await saveVisit(clinicId, payload); await onSaved(); }
     catch (error) { alert(error.message || "Не удалось сохранить визит"); }
     finally { setBusy(false); }
   };
@@ -2196,7 +2221,7 @@ function VisitEditor({ patient, visit, presetDate, clinicId, onClose, onSaved, o
           </div>
         )}
         <div className="form-grid">
-          <Field label="Дата и время"><input type="datetime-local" value={(form.date || "").slice(0, 16)} onChange={(e) => set("date", e.target.value)} /></Field>
+          <Field label="Дата и время"><input type="datetime-local" value={form.date ? localDateTimeInput(form.date) : ""} onChange={(e) => set("date", e.target.value)} /></Field>
           <Field label="Тип визита"><select value={form.visit_kind || "Первичный визит"} onChange={(e) => set("visit_kind", e.target.value)}>{["Первичный визит", "Повторный визит", "Контрольный визит", "Экстренный визит", "Онлайн-консультация", "Другое"].map((v) => <option key={v}>{v}</option>)}</select></Field>
           <Field label="Вид лечения"><select value={form.treatment_type} onChange={(e) => set("treatment_type", e.target.value)}>{["Консультация", "Профессиональная гигиена", "Лечение кариеса", "Эндодонтическое лечение", "Реставрация", "Удаление зуба", "Хирургический приём", "Пародонтологическое лечение", "Ортопедический этап", "Ортодонтический приём", "Имплантация", "Контрольный осмотр", "Другое"].map((v) => <option key={v}>{v}</option>)}</select></Field>
           <Field label="Зуб / область (FDI)"><input value={form.teeth || ""} onChange={(e) => set("teeth", e.target.value)} /></Field>
@@ -2209,7 +2234,7 @@ function VisitEditor({ patient, visit, presetDate, clinicId, onClose, onSaved, o
           <div className="form-divider full">Финансы визита</div>
           {["total_cost", "paid_amount", "discount", "refund"].map((key) => <Field key={key} label={{ total_cost: "Стоимость", paid_amount: "Оплачено", discount: "Скидка", refund: "Возврат" }[key]}><input type="number" min="0" inputMode="decimal" value={form[key]} onChange={(e) => set(key, Number(e.target.value))} /></Field>)}
           <div className="debt-preview full"><span>Задолженность</span><strong>{money.format(debt)}</strong></div>
-          <Field label="Следующий визит"><input type="datetime-local" value={(form.next_visit_date || "").slice(0, 16)} onChange={(e) => set("next_visit_date", e.target.value)} /></Field>
+          <Field label="Следующий визит"><input type="datetime-local" value={form.next_visit_date ? localDateTimeInput(form.next_visit_date) : ""} onChange={(e) => set("next_visit_date", e.target.value)} /></Field>
         </div>
         <div className="modal-actions treatment-editor-actions">
           {visit && <button type="button" className="danger-action" disabled={busy} onClick={remove}><Trash2 />Удалить запись</button>}
